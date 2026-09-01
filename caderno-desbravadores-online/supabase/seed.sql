@@ -30,7 +30,7 @@ on conflict (id) do update set
 insert into public.director_credentials (profile_id, password_plain)
 select
   id,
-  'TROQUE-ESTA-SENHA'
+  '12345678'
 from public.profiles
 where username = 'diretor'
 on conflict (profile_id) do update set
