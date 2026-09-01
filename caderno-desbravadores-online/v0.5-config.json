@@ -1,0 +1,41 @@
+{
+  "version": "1.0",
+  "digitalNotebook": "self-contained local HTML, not published by the app",
+  "approvalFlow": [
+    "leadership",
+    "regional-final"
+  ],
+  "regionalRejectionResets": true,
+  "roles": [
+    "DIRECTOR",
+    "ADMIN",
+    "REGIONAL",
+    "DESBRAVADOR"
+  ],
+  "directorOnlyAccountManagement": true,
+  "inlineEvidence": [
+    "image",
+    "video",
+    "pdf",
+    "text",
+    "youtube"
+  ],
+  "multipleFilesPerRequirement": true,
+  "checklists": {
+    "scout": "leadership-approved",
+    "leadership": "same-as-scout-leadership-approved",
+    "regional": "regional-final-approved",
+    "director": "not-displayed"
+  },
+  "alphabeticalScoutList": true,
+  "searchScout": true,
+  "reviewApproval": true,
+  "finalAdjustments": [
+    "remove-cover-emblem",
+    "hide-test-credentials-on-login",
+    "director-self-password-change",
+    "remove-global-reset",
+    "delete-scout-data-with-account",
+    "leadership-messages-before-submission"
+  ]
+}
