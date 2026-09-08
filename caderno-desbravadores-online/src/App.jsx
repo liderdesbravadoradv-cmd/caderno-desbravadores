@@ -6,6 +6,7 @@ import {
   manageUser,
   saveEvidenceFiles,
   getEvidenceFile,
+  deleteEvidenceFile,
   authenticateUser
 } from './lib/storage';
 import { generateDigitalNotebook } from './lib/notebook';
@@ -290,8 +291,9 @@ function Checklist({ selected, setSelected, progress, role }) {
   );
 }
 
-function EvidencePreview({ file }) {
+function EvidencePreview({ file, canDelete = false, onDelete }) {
   const [url, setUrl] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -322,11 +324,37 @@ function EvidencePreview({ file }) {
 
   const stop = (event) => event.stopPropagation();
 
+  const remove = async (event) => {
+    event.stopPropagation();
+    if (!canDelete || deleting) return;
+    if (!window.confirm(`Excluir o arquivo "${file.name}"?`)) return;
+
+    setDeleting(true);
+    try {
+      await onDelete?.(file);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const deleteButton = canDelete ? (
+    <button
+      type="button"
+      className="file-delete-button"
+      onClick={remove}
+      disabled={deleting}
+      title="Excluir arquivo"
+    >
+      {deleting ? 'Excluindo…' : 'Excluir'}
+    </button>
+  ) : null;
+
   if (file.type?.startsWith('image/')) {
     return (
       <div className="evidence-preview" onClick={stop}>
         <img src={url} alt={file.name} />
         <small>{file.name}</small>
+        {deleteButton}
       </div>
     );
   }
@@ -336,6 +364,7 @@ function EvidencePreview({ file }) {
       <div className="evidence-preview" onClick={stop}>
         <video controls preload="metadata" src={url} />
         <small>{file.name}</small>
+        {deleteButton}
       </div>
     );
   }
@@ -345,6 +374,7 @@ function EvidencePreview({ file }) {
       <div className="evidence-preview" onClick={stop}>
         <iframe title={file.name} src={url} />
         <small>{file.name}</small>
+        {deleteButton}
       </div>
     );
   }
@@ -363,17 +393,23 @@ function EvidencePreview({ file }) {
           {file.type || 'arquivo'} {formatBytes(file.size)}
         </small>
       </span>
+      {deleteButton}
     </a>
   );
 }
 
-function EvidenceGallery({ submission }) {
+function EvidenceGallery({ submission, canDelete = false, onDeleteFile }) {
   if (!submission?.files?.length) return null;
 
   return (
     <div className="evidence-gallery">
       {submission.files.map((file) => (
-        <EvidencePreview key={file.id} file={file} />
+        <EvidencePreview
+          key={file.id}
+          file={file}
+          canDelete={canDelete}
+          onDelete={onDeleteFile}
+        />
       ))}
     </div>
   );
@@ -475,9 +511,11 @@ function EvidenceForm({
             type="file"
             accept="image/*,video/*,application/pdf"
             multiple
-            onChange={(event) =>
-              setFiles(Array.from(event.target.files || []))
-            }
+            onChange={(event) => {
+              const selected = Array.from(event.target.files || []);
+              setFiles((current) => [...current, ...selected]);
+              event.target.value = '';
+            }}
           />
           <small>Vários arquivos podem ser acrescentados.</small>
         </label>
@@ -652,6 +690,7 @@ function Requirement({
   role,
   onReview,
   onMessage,
+  onDeleteFile,
   scoutKey,
   messages,
   open,
@@ -711,6 +750,12 @@ function Requirement({
               className="visible-answer"
               onClick={(event) => event.stopPropagation()}
             >
+              {editable && submission.files?.length > 0 && (
+                <div className="file-order-hint">
+                  As fotos/arquivos aparecem na ordem em que foram enviados.
+                </div>
+              )}
+
               {submission.text && (
                 <div className="answer-text">
                   <b>Resposta / relatório</b>
@@ -732,7 +777,11 @@ function Requirement({
                   </div>
                 )}
 
-              <EvidenceGallery submission={submission} />
+              <EvidenceGallery
+                submission={submission}
+                canDelete={editable}
+                onDeleteFile={(file) => onDeleteFile?.(item, file)}
+              />
             </div>
           </>
         )}
@@ -832,6 +881,29 @@ function ClassPage({
     saveDB(next);
     setDb(next);
     setOpenReq(null);
+  };
+
+  const handleDeleteFile = async (item, file) => {
+    const key = `${scout.id}:${classData.slug}:${item.id}`;
+    const current = db.submissions[key];
+    if (!current?.files?.length) return;
+
+    await deleteEvidenceFile(file.path || file.id);
+
+    const next = {
+      ...db,
+      submissions: {
+        ...db.submissions,
+        [key]: {
+          ...current,
+          files: current.files.filter((entry) => entry.id !== file.id),
+          updatedAt: new Date().toISOString()
+        }
+      }
+    };
+
+    saveDB(next);
+    setDb(next);
   };
 
   const handleMessage = (item, text) => {

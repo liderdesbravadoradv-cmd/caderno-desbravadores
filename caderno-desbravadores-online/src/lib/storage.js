@@ -179,6 +179,13 @@ export async function saveEvidenceFiles(files, key) {
   return saved;
 }
 
+export async function deleteEvidenceFile(id) {
+  if (!supabase) return;
+
+  const { error } = await supabase.storage.from('evidence').remove([id]);
+  if (error) throw error;
+}
+
 export async function getEvidenceFile(id) {
   if (!supabase) return null;
 
