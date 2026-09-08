@@ -779,7 +779,7 @@ function Requirement({
 
               <EvidenceGallery
                 submission={submission}
-                canDelete={editable}
+                canDelete={editable && open && submission.status === 'adminRejected'}
                 onDeleteFile={(file) => onDeleteFile?.(item, file)}
               />
             </div>
@@ -794,7 +794,7 @@ function Requirement({
         )}
 
 
-        {editable && open && (
+        {editable && open && (!submission || submission.status === 'adminRejected') && (
           <EvidenceForm
             submission={submission}
             submissionKey={`${scoutKey}:${classData.slug}:${item.id}`}
@@ -866,6 +866,11 @@ function ClassPage({
     const key = `${scout.id}:${classData.slug}:${item.id}`;
     const old = next.submissions[key] || {};
 
+    if (old.status && old.status !== 'adminRejected') {
+      alert('Este requisito só pode ser alterado depois de ser devolvido pela diretoria.');
+      return;
+    }
+
     next.submissions[key] = {
       ...old,
       ...data,
@@ -878,7 +883,7 @@ function ClassPage({
     };
 
     if (next.messages) delete next.messages[key];
-    saveDB(next);
+    await saveDB(next);
     setDb(next);
     setOpenReq(null);
   };
@@ -886,24 +891,31 @@ function ClassPage({
   const handleDeleteFile = async (item, file) => {
     const key = `${scout.id}:${classData.slug}:${item.id}`;
     const current = db.submissions[key];
-    if (!current?.files?.length) return;
+    if (!current?.files?.length || current.status !== 'adminRejected') return;
 
-    await deleteEvidenceFile(file.path || file.id);
+    try {
+      await deleteEvidenceFile(file.path || file.id);
 
-    const next = {
-      ...db,
-      submissions: {
-        ...db.submissions,
-        [key]: {
-          ...current,
-          files: current.files.filter((entry) => entry.id !== file.id),
-          updatedAt: new Date().toISOString()
+      const next = {
+        ...db,
+        submissions: {
+          ...db.submissions,
+          [key]: {
+            ...current,
+            files: current.files.filter(
+              (entry) => (entry.path || entry.id) !== (file.path || file.id)
+            ),
+            updatedAt: new Date().toISOString()
+          }
         }
-      }
-    };
+      };
 
-    saveDB(next);
-    setDb(next);
+      await saveDB(next);
+      setDb(next);
+    } catch (error) {
+      console.error('Erro ao excluir arquivo:', error);
+      alert(error?.message || 'Não foi possível excluir o arquivo. Tente novamente.');
+    }
   };
 
   const handleMessage = (item, text) => {

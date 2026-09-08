@@ -182,8 +182,17 @@ export async function saveEvidenceFiles(files, key) {
 export async function deleteEvidenceFile(id) {
   if (!supabase) return;
 
-  const { error } = await supabase.storage.from('evidence').remove([id]);
+  const path = String(id || '').trim();
+  if (!path) throw new Error('Arquivo inválido.');
+
+  const { data, error } = await supabase.storage
+    .from('evidence')
+    .remove([path]);
+
   if (error) throw error;
+  if (!data?.length) {
+    throw new Error('O arquivo não foi excluído do armazenamento.');
+  }
 }
 
 export async function getEvidenceFile(id) {
