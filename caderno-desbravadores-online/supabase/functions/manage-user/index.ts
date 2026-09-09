@@ -35,16 +35,6 @@ Deno.serve(async (req) => {
   const { data: callerData, error: callerError } = await callerClient.auth.getUser();
   if (callerError || !callerData.user) return json({ error: 'Sessão inválida.' }, 401);
 
-  const { data: callerProfile, error: profileError } = await admin
-    .from('profiles')
-    .select('id,role')
-    .eq('id', callerData.user.id)
-    .single();
-
-  if (profileError || callerProfile?.role !== 'DIRECTOR') {
-    return json({ error: 'Somente o Diretor pode gerenciar acessos.' }, 403);
-  }
-
   let body: any;
   try {
     body = await req.json();
@@ -54,8 +44,46 @@ Deno.serve(async (req) => {
 
   const action = body.action;
 
-  if (!['create', 'update', 'delete'].includes(action)) {
+  if (!['create', 'update', 'delete', 'delete-evidence'].includes(action)) {
     return json({ error: 'Ação inválida.' }, 400);
+  }
+
+  if (action === 'delete-evidence') {
+    const path = String(body.path || '').trim();
+    if (!path) return json({ error: 'Arquivo não informado.' }, 400);
+
+    const ownerId = path.split('/')[0] || '';
+    // Um desbravador só pode excluir arquivos pertencentes à própria pasta.
+    // O Diretor também pode excluir arquivos quando essa ação for usada por ele.
+    const { data: ownerProfile, error: ownerError } = await admin
+      .from('profiles')
+      .select('id,role')
+      .eq('id', callerData.user.id)
+      .single();
+
+    if (ownerError || !ownerProfile) return json({ error: 'Perfil não encontrado.' }, 403);
+
+    const allowed = ownerProfile.role === 'DIRECTOR' || ownerId === callerData.user.id;
+    if (!allowed) return json({ error: 'Você não pode excluir este arquivo.' }, 403);
+
+    const { data: removed, error: removeError } = await admin.storage
+      .from('evidence')
+      .remove([path]);
+
+    if (removeError) return json({ error: removeError.message }, 400);
+    if (!removed?.length) return json({ error: 'O arquivo não foi encontrado ou não pôde ser excluído.' }, 404);
+
+    return json({ ok: true });
+  }
+
+  const { data: callerProfile, error: profileError } = await admin
+    .from('profiles')
+    .select('id,role')
+    .eq('id', callerData.user.id)
+    .single();
+
+  if (profileError || callerProfile?.role !== 'DIRECTOR') {
+    return json({ error: 'Somente o Diretor pode gerenciar acessos.' }, 403);
   }
 
   if (action === 'delete') {

@@ -185,14 +185,15 @@ export async function deleteEvidenceFile(id) {
   const path = String(id || '').trim();
   if (!path) throw new Error('Arquivo inválido.');
 
-  const { data, error } = await supabase.storage
-    .from('evidence')
-    .remove([path]);
+  // A exclusão passa pela Edge Function para usar a chave administrativa
+  // somente no servidor e não depender da política DELETE do Storage no cliente.
+  const { data, error } = await supabase.functions.invoke('manage-user', {
+    body: { action: 'delete-evidence', path }
+  });
 
-  if (error) throw error;
-  if (!data?.length) {
-    throw new Error('O arquivo não foi excluído do armazenamento.');
-  }
+  if (error) throw new Error(error.message || 'Não foi possível excluir o arquivo.');
+  if (data?.error) throw new Error(data.error);
+  if (!data?.ok) throw new Error('O arquivo não foi excluído do armazenamento.');
 }
 
 export async function getEvidenceFile(id) {
