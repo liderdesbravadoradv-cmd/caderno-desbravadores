@@ -469,11 +469,7 @@ Deno.serve(async (req: Request) => {
     body.unit || ''
   ).trim();
 
-  if (
-    !username ||
-    !password ||
-    !name
-  ) {
+  if (!username || !name || (action === 'create' && !password)) {
     return json(
       {
         error:
@@ -593,39 +589,6 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const {
-      error: credentialError,
-    } = await admin
-      .from('director_credentials')
-      .insert({
-        profile_id:
-          created.user.id,
-        password_plain:
-          password,
-      });
-
-    if (credentialError) {
-      await admin
-        .from('profiles')
-        .delete()
-        .eq(
-          'id',
-          created.user.id
-        );
-
-      await admin.auth.admin.deleteUser(
-        created.user.id
-      );
-
-      return json(
-        {
-          error:
-            credentialError.message,
-        },
-        400
-      );
-    }
-
     return json({
       ok: true,
       id: created.user.id,
@@ -703,15 +666,15 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const {
-      error: authUpdateError,
-    } = await admin.auth.admin.updateUserById(
+    const authUpdate = {
+      email,
+      email_confirm: true,
+      ...(password ? { password } : {}),
+    };
+
+    const { error: authUpdateError } = await admin.auth.admin.updateUserById(
       userId,
-      {
-        email,
-        password,
-        email_confirm: true,
-      }
+      authUpdate
     );
 
     if (authUpdateError) {
@@ -749,27 +712,6 @@ Deno.serve(async (req: Request) => {
         {
           error:
             updateError.message,
-        },
-        400
-      );
-    }
-
-    const {
-      error: credentialError,
-    } = await admin
-      .from('director_credentials')
-      .upsert({
-        profile_id:
-          userId,
-        password_plain:
-          password,
-      });
-
-    if (credentialError) {
-      return json(
-        {
-          error:
-            credentialError.message,
         },
         400
       );

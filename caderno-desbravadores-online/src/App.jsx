@@ -1103,7 +1103,7 @@ function AccountManager({ db, setDb }) {
   const saveUser = async (event) => {
     event.preventDefault();
 
-    if (!form.name || !form.username || !form.password) return;
+    if (!form.name || !form.username || (!editing && !form.password)) return;
 
     const duplicate = db.users.some(
       (user) =>
@@ -1154,7 +1154,7 @@ function AccountManager({ db, setDb }) {
     setForm({
       name: user.name || '',
       username: user.username || '',
-      password: user.password || '',
+      password: '',
       role: user.role,
       birth: user.birth || '',
       club: user.club || 'Clube Manancial',
@@ -1193,14 +1193,12 @@ function AccountManager({ db, setDb }) {
             </div>
 
             <div className="account-password">
-              <code>{user.password}</code>
-
               <button
                 className="outline"
                 onClick={() => edit(user)}
                 type="button"
               >
-                Editar senha
+                Editar acesso ou redefinir senha
               </button>
 
               {user.id !== 'director-1' && (
@@ -1246,7 +1244,8 @@ function AccountManager({ db, setDb }) {
             />
 
             <input
-              placeholder="Senha"
+              placeholder={editing ? 'Nova senha (opcional)' : 'Senha temporária'}
+              type="password"
               value={form.password}
               onChange={(event) =>
                 setForm({
@@ -1254,7 +1253,7 @@ function AccountManager({ db, setDb }) {
                   password: event.target.value
                 })
               }
-              required
+              required={!editing}
             />
 
             <select
@@ -1471,12 +1470,12 @@ function LeadershipPanel({ user, db, setDb }) {
 function DirectorSettings({ user, db, setDb, onUserChange }) {
   const current = db.users.find((item) => item.id === user.id) || user;
   const [username, setUsername] = useState(current.username || '');
-  const [password, setPassword] = useState(current.password || '');
+  const [password, setPassword] = useState('');
   const [saved, setSaved] = useState('');
 
   const save = async (event) => {
     event.preventDefault();
-    if (!username.trim() || !password) return;
+    if (!username.trim()) return;
     const duplicate = db.users.some((item) => item.username.toLowerCase() === username.trim().toLowerCase() && item.id !== user.id);
     if (duplicate) { alert('Este nome de usuário já está cadastrado.'); return; }
 
@@ -1506,7 +1505,7 @@ function DirectorSettings({ user, db, setDb, onUserChange }) {
       <div className="panel-head"><div><span className="small-label">SEGURANÇA DO DIRETOR</span><h2>Meu acesso</h2><p>O Diretor também pode alterar o próprio usuário e a própria senha.</p></div></div>
       <form onSubmit={save} className="director-settings-form">
         <label>Usuário<input value={username} onChange={(event) => setUsername(event.target.value)} required /></label>
-        <label>Senha<input value={password} onChange={(event) => setPassword(event.target.value)} required /></label>
+        <label>Nova senha (opcional)<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
         <button className="primary" type="submit">Salvar meu acesso</button>
         {saved && <div className="alert success">{saved}</div>}
       </form>

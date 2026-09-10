@@ -16,12 +16,6 @@ create table if not exists public.profiles (
   updated_at timestamptz not null default now()
 );
 
-create table if not exists public.director_credentials (
-  profile_id uuid primary key references public.profiles(id) on delete cascade,
-  password_plain text not null,
-  updated_at timestamptz not null default now()
-);
-
 create table if not exists public.club_state (
   profile_id uuid primary key references public.profiles(id) on delete cascade,
   submissions jsonb not null default '{}'::jsonb,
@@ -50,16 +44,13 @@ grant usage on schema private to authenticated;
 grant execute on function private.current_role() to authenticated;
 
 alter table public.profiles enable row level security;
-alter table public.director_credentials enable row level security;
 alter table public.club_state enable row level security;
 
 revoke all on table public.profiles from anon, authenticated;
-revoke all on table public.director_credentials from anon, authenticated;
 revoke all on table public.club_state from anon, authenticated;
 
 grant select on table public.profiles to authenticated;
 grant select, insert, update on table public.club_state to authenticated;
-grant select on table public.director_credentials to authenticated;
 
 create policy "Profiles visible to the account owner and club evaluators"
 on public.profiles
@@ -100,12 +91,6 @@ with check (
   profile_id = (select auth.uid())
   or (select private.current_role()) in ('DIRECTOR','ADMIN','REGIONAL')
 );
-
-create policy "Only the Director can read managed passwords"
-on public.director_credentials
-for select
-to authenticated
-using ((select private.current_role()) = 'DIRECTOR');
 
 -- Bucket privado para fotos, vídeos e PDFs das atividades.
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)

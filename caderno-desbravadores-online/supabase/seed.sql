@@ -27,19 +27,6 @@ on conflict (id) do update set
   club = excluded.club,
   unit = excluded.unit;
 
-insert into public.director_credentials (profile_id, password_plain)
-select
-  id,
-  'TROQUE-ESTA-SENHA'
-from public.profiles
-where username = 'diretor'
-on conflict (profile_id) do update set
-  password_plain = excluded.password_plain,
-  updated_at = now();
-
 insert into public.club_state (profile_id)
 select id from public.profiles where username = 'diretor'
 on conflict (profile_id) do nothing;
-
--- Depois de executar, entre no aplicativo e altere a senha do Diretor
--- pela própria tela "Meu acesso" se desejar.

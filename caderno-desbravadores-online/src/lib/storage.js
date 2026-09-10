@@ -14,10 +14,9 @@ const seed = {
 const usernameEmail = (username) =>
   `${encodeURIComponent(String(username || '').trim().toLowerCase())}@login.clube.local`;
 
-const normalizeProfile = (row, password = '') => ({
+const normalizeProfile = (row) => ({
   id: row.id,
   username: row.username,
-  password,
   role: row.role,
   name: row.name,
   birth: row.birth_date ? String(row.birth_date).split('-').reverse().join('/') : '',
@@ -107,15 +106,6 @@ async function getVisibleProfiles(current) {
   return data || [];
 }
 
-async function getDirectorPasswords(current) {
-  if (current.role !== 'DIRECTOR') return {};
-  const { data, error } = await supabase
-    .from('director_credentials')
-    .select('profile_id,password_plain');
-  if (error) throw error;
-  return Object.fromEntries((data || []).map((row) => [row.profile_id, row.password_plain]));
-}
-
 async function getVisibleStates(current) {
   let query = supabase.from('club_state').select('profile_id,submissions,messages');
   if (current.role === 'DESBRAVADOR') query = query.eq('profile_id', current.id);
@@ -128,10 +118,9 @@ export async function loadDB() {
   if (!supabase) return structuredClone(seed);
 
   const current = await getCurrentProfile();
-  const [profiles, states, passwords] = await Promise.all([
+  const [profiles, states] = await Promise.all([
     getVisibleProfiles(current),
-    getVisibleStates(current),
-    getDirectorPasswords(current)
+    getVisibleStates(current)
   ]);
 
   const submissions = {};
@@ -144,7 +133,7 @@ export async function loadDB() {
 
   return {
     ...seed,
-    users: profiles.map((row) => normalizeProfile(row, passwords[row.id] || '')),
+    users: profiles.map(normalizeProfile),
     submissions,
     messages
   };
