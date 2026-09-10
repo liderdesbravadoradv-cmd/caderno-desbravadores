@@ -7,7 +7,10 @@ import {
   saveEvidenceFiles,
   getEvidenceFile,
   deleteEvidenceFile,
-  authenticateUser
+  authenticateUser,
+  getSessionExpiresAt,
+  restoreAuthenticatedUser,
+  signOutUser
 } from './lib/storage';
 import { generateDigitalNotebook } from './lib/notebook';
 
@@ -1629,11 +1632,71 @@ function mapScoutSubmissions(id, db) {
 export default function App() {
   const [user, setUser] = useState(null);
   const [db, setDb] = useState(null);
+  const [isRestoringSession, setIsRestoringSession] = useState(true);
+
+  useEffect(() => {
+    let isActive = true;
+
+    restoreAuthenticatedUser()
+      .then((savedSession) => {
+        if (!isActive || !savedSession) return;
+
+        setUser(savedSession.user);
+        setDb(savedSession.db);
+      })
+      .catch(() => {
+        // Uma sessão inválida deve retornar à tela de login.
+      })
+      .finally(() => {
+        if (isActive) setIsRestoringSession(false);
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
 
   const handleLogin = (loggedUser, loadedDB) => {
     setUser(loggedUser);
     setDb(loadedDB);
   };
+
+  const handleLogout = async () => {
+    try {
+      await signOutUser();
+    } finally {
+      setUser(null);
+      setDb(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!user) return undefined;
+
+    const expiresAt = getSessionExpiresAt();
+    const delay = expiresAt - Date.now();
+
+    if (!Number.isFinite(expiresAt) || delay <= 0) {
+      void handleLogout();
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void handleLogout();
+    }, delay);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [user]);
+
+  if (isRestoringSession) {
+    return (
+      <div className="login-page">
+        <div className="login-card">
+          <p className="muted">Verificando seu acesso...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!user || !db) {
     return <Login onLogin={handleLogin} />;
@@ -1641,7 +1704,7 @@ export default function App() {
 
   return (
     <>
-      <Topbar user={user} onLogout={() => setUser(null)} />
+      <Topbar user={user} onLogout={handleLogout} />
 
       <main className="page">
         {user.role === 'DESBRAVADOR' ? (

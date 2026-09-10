@@ -1,5 +1,8 @@
 import { supabase } from './supabase';
 
+const SESSION_EXPIRES_AT_KEY = 'caderno-desbravadores.session-expires-at';
+const SESSION_DURATION_MS = 24 * 60 * 60 * 1000;
+
 const seed = {
   users: [],
   submissions: {},
@@ -32,7 +35,54 @@ export async function authenticateUser(username, password) {
 
   if (error || !data.user) throw new Error('Usuário ou senha inválidos.');
 
+  localStorage.setItem(
+    SESSION_EXPIRES_AT_KEY,
+    String(Date.now() + SESSION_DURATION_MS)
+  );
+
   return loadDB();
+}
+
+export async function restoreAuthenticatedUser() {
+  if (!supabase) return null;
+
+  const expiresAt = Number(localStorage.getItem(SESSION_EXPIRES_AT_KEY));
+
+  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+    localStorage.removeItem(SESSION_EXPIRES_AT_KEY);
+    await supabase.auth.signOut();
+    return null;
+  }
+
+  const {
+    data: { session }
+  } = await supabase.auth.getSession();
+
+  if (!session?.user) {
+    localStorage.removeItem(SESSION_EXPIRES_AT_KEY);
+    return null;
+  }
+
+  const db = await loadDB();
+  const user = db.users.find((item) => item.id === session.user.id);
+
+  if (!user) {
+    localStorage.removeItem(SESSION_EXPIRES_AT_KEY);
+    await supabase.auth.signOut();
+    return null;
+  }
+
+  return { db, user, expiresAt };
+}
+
+export function getSessionExpiresAt() {
+  return Number(localStorage.getItem(SESSION_EXPIRES_AT_KEY));
+}
+
+export async function signOutUser() {
+  localStorage.removeItem(SESSION_EXPIRES_AT_KEY);
+
+  if (supabase) await supabase.auth.signOut();
 }
 
 async function getCurrentProfile() {
