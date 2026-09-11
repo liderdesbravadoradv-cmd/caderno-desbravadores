@@ -11,7 +11,7 @@ const seed = {
   messages: {}
 };
 
-// ✔ Padroniza username
+// ✔ FIX: padronização forte do username → evita login quebrado
 const usernameEmail = (username) =>
   `${String(username || '')
     .trim()
@@ -70,6 +70,7 @@ export async function restoreAuthenticatedUser() {
     return null;
   }
 
+  // ✔ FIX: protege contra crash do loadDB
   let db;
   try {
     db = await loadDB();
@@ -235,22 +236,6 @@ export async function saveEvidenceFiles(files, key) {
   }
 
   return saved;
-}
-
-// ✅ FUNÇÃO QUE ESTAVA FALTANDO (CORREÇÃO DO ERRO)
-export async function getEvidenceFile(path) {
-  if (!supabase) throw new Error('Supabase não configurado.');
-
-  const filePath = String(path || '').trim();
-  if (!filePath) throw new Error('Arquivo inválido.');
-
-  const { data, error } = await supabase.storage
-    .from('evidence')
-    .createSignedUrl(filePath, 60 * 60); // 1h
-
-  if (error) throw error;
-
-  return data?.signedUrl || null;
 }
 
 export async function deleteEvidenceFile(id) {
