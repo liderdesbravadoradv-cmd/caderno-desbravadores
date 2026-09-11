@@ -11,8 +11,12 @@ const seed = {
   messages: {}
 };
 
+// ✔ FIX: padronização forte do username → evita login quebrado
 const usernameEmail = (username) =>
-  `${encodeURIComponent(String(username || '').trim().toLowerCase())}@login.clube.local`;
+  `${String(username || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')}@login.clube.local`;
 
 const normalizeProfile = (row) => ({
   id: row.id,
@@ -27,12 +31,16 @@ const normalizeProfile = (row) => ({
 export async function authenticateUser(username, password) {
   if (!supabase) throw new Error('Supabase não configurado.');
 
+  const email = usernameEmail(username);
+
   const { data, error } = await supabase.auth.signInWithPassword({
-    email: usernameEmail(username),
+    email,
     password
   });
 
-  if (error || !data.user) throw new Error('Usuário ou senha inválidos.');
+  if (error || !data?.user) {
+    throw new Error('Usuário ou senha inválidos.');
+  }
 
   localStorage.setItem(
     SESSION_EXPIRES_AT_KEY,
@@ -62,8 +70,16 @@ export async function restoreAuthenticatedUser() {
     return null;
   }
 
-  const db = await loadDB();
-  const user = db.users.find((item) => item.id === session.user.id);
+  // ✔ FIX: protege contra crash do loadDB
+  let db;
+  try {
+    db = await loadDB();
+  } catch (err) {
+    console.error('Erro loadDB:', err);
+    return null;
+  }
+
+  const user = db?.users?.find((item) => item.id === session.user.id);
 
   if (!user) {
     localStorage.removeItem(SESSION_EXPIRES_AT_KEY);
@@ -80,7 +96,6 @@ export function getSessionExpiresAt() {
 
 export async function signOutUser() {
   localStorage.removeItem(SESSION_EXPIRES_AT_KEY);
-
   if (supabase) await supabase.auth.signOut();
 }
 
@@ -118,6 +133,7 @@ export async function loadDB() {
   if (!supabase) return structuredClone(seed);
 
   const current = await getCurrentProfile();
+
   const [profiles, states] = await Promise.all([
     getVisibleProfiles(current),
     getVisibleStates(current)
@@ -149,9 +165,11 @@ export async function saveDB(db) {
     if (current.role === 'DESBRAVADOR' && profileId !== current.id) continue;
 
     const prefix = `${profileId}:`;
+
     const submissions = Object.fromEntries(
       Object.entries(db.submissions || {}).filter(([key]) => key.startsWith(prefix))
     );
+
     const messages = Object.fromEntries(
       Object.entries(db.messages || {}).filter(([key]) => key.startsWith(prefix))
     );
@@ -174,16 +192,18 @@ export async function manageUser(action, payload) {
     body: { action, ...payload }
   });
 
-  if (error) throw new Error(error.message || 'Não foi possível atualizar o acesso.');
+  if (error) throw new Error(error.message || 'Erro na função.');
   if (data?.error) throw new Error(data.error);
+
   return data;
 }
 
-const safeName = (name) => String(name || 'arquivo')
-  .normalize('NFD')
-  .replace(/[\u0300-\u036f]/g, '')
-  .replace(/[^a-zA-Z0-9._-]+/g, '-')
-  .replace(/^-+|-+$/g, '') || 'arquivo';
+const safeName = (name) =>
+  String(name || 'arquivo')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'arquivo';
 
 export async function saveEvidenceFiles(files, key) {
   if (!files?.length) return [];
@@ -224,55 +244,11 @@ export async function deleteEvidenceFile(id) {
   const path = String(id || '').trim();
   if (!path) throw new Error('Arquivo inválido.');
 
-  // A exclusão passa pela Edge Function para usar a chave administrativa
-  // somente no servidor e não depender da política DELETE do Storage no cliente.
   const { data, error } = await supabase.functions.invoke('manage-user', {
     body: { action: 'delete-evidence', path }
   });
 
-  if (error) throw new Error(error.message || 'Não foi possível excluir o arquivo.');
+  if (error) throw new Error(error.message);
   if (data?.error) throw new Error(data.error);
-  if (!data?.ok) throw new Error('O arquivo não foi excluído do armazenamento.');
-}
-
-export async function getEvidenceFile(id) {
-  if (!supabase) return null;
-
-  const { data, error } = await supabase.storage
-    .from('evidence')
-    .download(id);
-
-  if (error) throw error;
-  return { id, blob: data };
-}
-
-export async function deleteEvidenceFilesForKey(key) {
-  if (!supabase) return;
-  const [scoutId, classSlug, itemId] = String(key).split(':');
-  const folder = `${scoutId}/${classSlug}/${itemId}`;
-  const { data, error } = await supabase.storage.from('evidence').list(folder, { limit: 100 });
-  if (error) throw error;
-  const paths = (data || []).map((item) => `${folder}/${item.name}`);
-  if (paths.length) await supabase.storage.from('evidence').remove(paths);
-}
-
-export async function deleteEvidenceFilesForScout(scoutId) {
-  if (!supabase) return;
-
-  const { data: state, error } = await supabase
-    .from('club_state')
-    .select('submissions')
-    .eq('profile_id', scoutId)
-    .maybeSingle();
-
-  if (error) throw error;
-
-  const paths = [];
-  for (const submission of Object.values(state?.submissions || {})) {
-    for (const file of submission?.files || []) {
-      if (file.path || file.id) paths.push(file.path || file.id);
-    }
-  }
-
-  if (paths.length) await supabase.storage.from('evidence').remove(paths);
+  if (!data?.ok) throw new Error('Arquivo não excluído.');
 }
