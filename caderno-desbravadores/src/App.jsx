@@ -297,26 +297,59 @@ function Checklist({ selected, setSelected, progress, role }) {
 
 function EvidencePreview({ file, canDelete = false, onDelete }) {
   const [url, setUrl] = useState(null);
+  const [loadError, setLoadError] = useState('');
   const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     let alive = true;
     let objectUrl = null;
+    setUrl(null);
+    setLoadError('');
 
     (async () => {
-      const full = await getEvidenceFile(file.id);
+      try {
+        const full = await getEvidenceFile(file.path || file.id);
 
-      if (!full || !alive) return;
+        if (!full || !alive) return;
 
-      objectUrl = URL.createObjectURL(full.blob);
-      setUrl(objectUrl);
+        objectUrl = URL.createObjectURL(full.blob);
+        setUrl(objectUrl);
+      } catch (error) {
+        console.error('Erro ao carregar evidência:', file.path || file.id, error);
+        if (alive) {
+          setLoadError('Não foi possível carregar este arquivo.');
+        }
+      }
     })();
 
     return () => {
       alive = false;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [file.id]);
+  }, [file.path, file.id]);
+
+  if (loadError) {
+    return (
+      <div className="file-loading file-error">
+        <b>{file.name}</b>
+        <span>{loadError}</span>
+        {canDelete && (
+          <button
+            type="button"
+            className="file-delete-button"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (window.confirm(`Excluir o arquivo "${file.name}"?`)) {
+                onDelete?.(file);
+              }
+            }}
+          >
+            Excluir
+          </button>
+        )}
+      </div>
+    );
+  }
 
   if (!url) {
     return (
@@ -473,8 +506,10 @@ function EvidenceForm({
   const [youtube, setYoutube] = useState(submission?.youtube || '');
   const [files, setFiles] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const save = async (event) => {
+    setErrorMessage('');
     event.preventDefault();
     setBusy(true);
 
@@ -495,7 +530,10 @@ function EvidenceForm({
       await Promise.allSettled(
         saved.map((file) => deleteEvidenceFile(file.path || file.id))
       );
-      throw error;
+      console.error('Erro ao salvar evidência:', error);
+      setErrorMessage(
+        error?.message || 'Não foi possível salvar a atividade.'
+      );
     } finally {
       setBusy(false);
     }
@@ -522,7 +560,7 @@ function EvidenceForm({
           Adicionar arquivos
           <input
             type="file"
-            accept="image/*,video/*,application/pdf"
+            accept="image/*,application/pdf"
             multiple
             onChange={(event) => {
               const selected = Array.from(event.target.files || []);
@@ -530,7 +568,7 @@ function EvidenceForm({
               event.target.value = '';
             }}
           />
-          <small>Vários arquivos podem ser acrescentados.</small>
+          <small>Você pode acrescentar quantos arquivos quiser. Vídeos devem ser enviados pelo link do YouTube.</small>
         </label>
       </div>
 
@@ -552,6 +590,12 @@ function EvidenceForm({
           placeholder="Cole o link do YouTube"
         />
       </label>
+
+      {errorMessage && (
+        <div className="alert error" role="alert">
+          {errorMessage}
+        </div>
+      )}
 
       <div className="edit-actions">
         <button
@@ -792,11 +836,7 @@ function Requirement({
 
               <EvidenceGallery
                 submission={submission}
-                canDelete={
-                  editable &&
-                  open &&
-                  ['submitted', 'adminRejected', 'draft'].includes(submission.status)
-                }
+                canDelete={editable && open}
                 onDeleteFile={(file) => onDeleteFile?.(item, file)}
               />
             </div>
@@ -811,8 +851,9 @@ function Requirement({
         )}
 
 
-        {editable && open && (!submission || ['adminRejected', 'draft'].includes(submission.status)) && (
+        {editable && open && (
           <EvidenceForm
+            key={`${submission?.updatedAt || 'new'}-${submission?.files?.length || 0}`}
             submission={submission}
             submissionKey={`${scoutKey}:${classData.slug}:${item.id}`}
             onSubmit={(data) => onSubmit(item, data)}
@@ -883,15 +924,12 @@ function ClassPage({
     const key = `${scout.id}:${classData.slug}:${item.id}`;
     const old = next.submissions[key] || {};
 
-    if (old.status && !['adminRejected', 'draft'].includes(old.status)) {
-      alert('Este requisito só pode ser alterado depois de ser devolvido pela diretoria.');
-      return;
-    }
-
     next.submissions[key] = {
       ...old,
       ...data,
       files: [...(old.files || []), ...(data.files || [])],
+      // Qualquer alteração feita pelo Desbravador invalida a aprovação
+      // anterior e inicia novamente o fluxo de avaliação.
       status: 'submitted',
       submittedBy: scout.id,
       updatedAt: new Date().toISOString(),
@@ -922,10 +960,11 @@ function ClassPage({
             files: current.files.filter(
               (entry) => (entry.path || entry.id) !== (file.path || file.id)
             ),
-            // Ao apagar um arquivo de uma entrega ainda aguardando análise,
-            // a entrega volta para rascunho para que o Desbravador possa
-            // corrigir e reenviar o requisito sem depender da Diretoria.
-            status: current.status === 'submitted' ? 'draft' : current.status,
+            // Alterar a comprovação invalida qualquer aprovação anterior.
+            // O requisito volta para rascunho e pode ser reenviado.
+            status: 'draft',
+            adminComment: '',
+            regionalComment: '',
             updatedAt: new Date().toISOString()
           }
         }
@@ -939,7 +978,7 @@ function ClassPage({
     }
   };
 
-  const handleMessage = (item, text) => {
+  const handleMessage = async (item, text) => {
     const key = `${scout.id}:${classData.slug}:${item.id}`;
     const next = {
       ...db,
@@ -950,11 +989,17 @@ function ClassPage({
       ...current,
       { text, at: new Date().toISOString(), role: user.role }
     ];
-    saveDB(next);
-    setDb(next);
+
+    try {
+      await saveDB(next);
+      setDb(next);
+    } catch (error) {
+      console.error('Erro ao enviar mensagem:', error);
+      alert(error?.message || 'Não foi possível enviar a mensagem.');
+    }
   };
 
-  const handleReview = (item, decision) => {
+  const handleReview = async (item, decision) => {
     const next = {
       ...db,
       submissions: { ...db.submissions }
@@ -1002,8 +1047,13 @@ function ClassPage({
       };
     }
 
-    saveDB(next);
-    setDb(next);
+    try {
+      await saveDB(next);
+      setDb(next);
+    } catch (error) {
+      console.error('Erro ao salvar avaliação:', error);
+      alert(error?.message || 'Não foi possível salvar a avaliação.');
+    }
   };
 
   if (!classData) {
@@ -1352,7 +1402,7 @@ function ScoutPanel({ user, db, setDb }) {
         <div>
           <b>Seu caderno</b>
           <span>
-            As respostas, fotos, vídeos, textos e datas aparecem
+            As respostas, fotos, arquivos, textos e datas aparecem
             diretamente nos requisitos.
           </span>
         </div>

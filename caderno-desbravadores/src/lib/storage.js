@@ -205,34 +205,66 @@ const safeName = (name) =>
     .replace(/[^a-zA-Z0-9._-]+/g, '-')
     .replace(/^-+|-+$/g, '') || 'arquivo';
 
+export async function getEvidenceFile(id) {
+  if (!supabase) throw new Error('Supabase não configurado.');
+
+  const path = String(id || '').trim();
+  if (!path) throw new Error('Arquivo inválido.');
+
+  const { data, error } = await supabase.storage
+    .from('evidence')
+    .download(path);
+
+  if (error) throw error;
+  if (!data) throw new Error('O arquivo não foi encontrado.');
+
+  return { blob: data };
+}
+
 export async function saveEvidenceFiles(files, key) {
   if (!files?.length) return [];
   if (!supabase) throw new Error('Supabase não configurado.');
 
-  const [scoutId, classSlug, itemId] = String(key).split(':');
+  const parts = String(key).split(':');
+  if (parts.length !== 3 || parts.some((part) => !part)) {
+    throw new Error('Identificador do requisito inválido.');
+  }
+
+  const [scoutId, classSlug, itemId] = parts;
   const saved = [];
 
-  for (const file of files) {
-    const id = crypto.randomUUID();
-    const path = `${scoutId}/${classSlug}/${itemId}/${id}-${safeName(file.name)}`;
+  try {
+    for (const file of files) {
+      const id = crypto.randomUUID();
+      const path = `${scoutId}/${classSlug}/${itemId}/${id}-${safeName(file.name)}`;
 
-    const { error } = await supabase.storage
-      .from('evidence')
-      .upload(path, file, {
-        contentType: file.type || 'application/octet-stream',
-        upsert: false
+      const { error } = await supabase.storage
+        .from('evidence')
+        .upload(path, file, {
+          contentType: file.type || 'application/octet-stream',
+          upsert: false
+        });
+
+      if (error) throw error;
+
+      saved.push({
+        id: path,
+        path,
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        createdAt: new Date().toISOString()
       });
-
-    if (error) throw error;
-
-    saved.push({
-      id: path,
-      path,
-      name: file.name,
-      type: file.type,
-      size: file.size,
-      createdAt: new Date().toISOString()
-    });
+    }
+  } catch (error) {
+    // Se uma das várias evidências falhar, não deixa as anteriores
+    // abandonadas no Storage.
+    if (saved.length) {
+      await supabase.storage
+        .from('evidence')
+        .remove(saved.map((file) => file.path));
+    }
+    throw error;
   }
 
   return saved;
