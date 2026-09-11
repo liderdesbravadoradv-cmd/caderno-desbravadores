@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+
+# Arquivos enviados pelos usuários
+uploads/
+storage/
+
+# Bancos locais
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
