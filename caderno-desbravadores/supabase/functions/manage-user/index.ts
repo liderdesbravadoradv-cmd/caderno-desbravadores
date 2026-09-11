@@ -217,19 +217,16 @@ Deno.serve(async (req: Request) => {
     const parts = path.split('/');
     const ownerId = parts[0] || '';
 
-    // O Storage deste projeto usa exatamente:
-    // <scoutId>/<classSlug>/<itemId>/<uuid>-<nome>
-    // A validação impede que um caminho arbitrário seja usado na função.
-    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    const objectNamePattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-.+$/i;
+    // Os arquivos de evidência seguem exatamente:
+    // <scoutId>/<classSlug>/<itemId>/<arquivo>
+    // Não aceite caminhos absolutos, traversal ou estruturas diferentes.
+    const isValidPath =
+      parts.length === 4 &&
+      parts.every((part) => part.length > 0) &&
+      !parts.some((part) => part === '.' || part === '..') &&
+      !path.includes('\\');
 
-    if (
-      parts.length !== 4 ||
-      !uuidPattern.test(ownerId) ||
-      !parts[1] ||
-      !parts[2] ||
-      !objectNamePattern.test(parts[3])
-    ) {
+    if (!isValidPath) {
       return json(
         {
           error:
