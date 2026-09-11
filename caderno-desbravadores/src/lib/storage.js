@@ -221,6 +221,26 @@ export async function getEvidenceFile(id) {
   return { blob: data };
 }
 
+export async function getEvidencePreviewUrl(id) {
+  if (!supabase) throw new Error('Supabase não configurado.');
+
+  const path = String(id || '').trim();
+  if (!path) throw new Error('Arquivo inválido.');
+
+  // O bucket é privado. A URL assinada preserva essa proteção e permite que
+  // o navegador carregue a mídia sem aguardar o download completo em memória.
+  const { data, error } = await supabase.storage
+    .from('evidence')
+    .createSignedUrl(path, 60 * 60);
+
+  if (error) throw error;
+  if (!data?.signedUrl) {
+    throw new Error('Não foi possível criar a visualização do arquivo.');
+  }
+
+  return data.signedUrl;
+}
+
 export async function saveEvidenceFiles(files, key) {
   if (!files?.length) return [];
   if (!supabase) throw new Error('Supabase não configurado.');

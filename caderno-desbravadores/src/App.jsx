@@ -11,7 +11,7 @@ import {
   saveDB,
   manageUser,
   saveEvidenceFiles,
-  getEvidenceFile,
+  getEvidencePreviewUrl,
   deleteEvidenceFile,
   authenticateUser,
   getSessionExpiresAt,
@@ -425,7 +425,6 @@ function EvidencePreview({
 
   useEffect(() => {
     let alive = true;
-    let objectUrl = null;
 
     setUrl(null);
     setLoadError('');
@@ -440,28 +439,11 @@ function EvidencePreview({
           );
         }
 
-        const full = await getEvidenceFile(path);
+        const signedUrl = await getEvidencePreviewUrl(path);
 
         if (!alive) return;
 
-        if (!full) {
-          throw new Error(
-            'Arquivo não encontrado.'
-          );
-        }
-
-        if (!(full.blob instanceof Blob)) {
-          throw new Error(
-            'O arquivo recebido não é um Blob válido.'
-          );
-        }
-
-        objectUrl =
-          URL.createObjectURL(full.blob);
-
-        if (alive) {
-          setUrl(objectUrl);
-        }
+        setUrl(signedUrl);
       } catch (error) {
         console.error(
           'Erro ao carregar evidência:',
@@ -482,10 +464,6 @@ function EvidencePreview({
 
     return () => {
       alive = false;
-
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-      }
     };
   }, [file?.path, file?.id]);
 
@@ -575,6 +553,9 @@ function EvidencePreview({
         <img
           src={url}
           alt={file.name}
+          onError={() =>
+            setLoadError('Não foi possível carregar esta imagem.')
+          }
         />
 
         <small>{file.name}</small>
