@@ -1,69 +1,19 @@
 # Publicação do Caderno de Classes
 
-## Arquitetura escolhida
+## Arquitetura atual
 
-- GitHub: código-fonte
-- Cloudflare Pages: hospedagem do React/Vite
-- Supabase Free: autenticação, banco e Storage
+- GitHub: código-fonte.
+- Cloudflare Pages: hospedagem opcional da interface React/Vite.
+- IndexedDB: contas, atividades e anexos guardados localmente em cada navegador.
 
-A interface do aplicativo não foi redesenhada. As alterações de código são apenas da camada de conexão e armazenamento online.
+O app não se conecta mais ao Supabase. O projeto e os dados que ainda existam na conta Supabase não são alterados por esta mudança.
 
-## 1. Supabase
+## Uso
 
-1. Crie um projeto gratuito no Supabase.
-2. Abra o SQL Editor e execute `supabase/migrations/001_initial.sql`.
-3. Crie o primeiro usuário do Diretor em Authentication > Users.
-   - O e-mail interno deve ser `diretor@login.clube.local` se você mantiver o usuário `diretor`.
-   - Marque o usuário como confirmado.
-   - A senha será a que você escolher.
-4. Edite `supabase/seed.sql` com o usuário, nome e senha do Diretor e execute-o no SQL Editor.
-5. Faça o deploy da função `manage-user`.
+Execute `npm install` e `npm run dev` para abrir o app no computador. No primeiro acesso, use `diretor` / `1234` e altere a senha em **Meu acesso**.
 
-### Deploy da função
+O armazenamento local pertence ao perfil do navegador e à origem do site. O uso em um endereço hospedado no Cloudflare Pages cria uma base separada da execução local e de outros dispositivos. Não há compartilhamento automático de contas, atividades ou anexos entre eles.
 
-Com o Supabase CLI instalado e autenticado:
+Se publicar no Cloudflare Pages, use `npm run build` como comando de build e `dist` como pasta de saída. Não configure variáveis `VITE_SUPABASE_*`.
 
-```bash
-supabase login
-supabase link --project-ref SEU_PROJECT_REF
-supabase functions deploy manage-user
-```
-
-A função usa a chave secreta do Supabase somente no ambiente da Edge Function. Ela nunca deve ser colocada no frontend, no GitHub ou em `.env` enviado ao Cloudflare.
-
-## 2. Variáveis do Cloudflare Pages
-
-No projeto do Cloudflare Pages, em Settings > Environment variables, configure:
-
-```text
-VITE_SUPABASE_URL=https://SEU-PROJETO.supabase.co
-VITE_SUPABASE_PUBLISHABLE_KEY=...
-```
-
-Use a **Publishable key** do Supabase. Não use a Secret key/service_role no navegador.
-
-Build command:
-
-```text
-npm run build
-```
-
-Output directory:
-
-```text
-dist
-```
-
-## 3. GitHub
-
-Envie somente o conteúdo de `caderno-desbravadores-online/`.
-
-Não envie:
-
-- `.env`
-- `node_modules/`
-- `dist/`
-- chaves secretas
-- dados reais do clube
-
-O `.env.example` pode ser enviado porque contém somente nomes de variáveis e valores de exemplo.
+Os dados podem ser apagados ao limpar os dados do site no navegador. O primeiro usuário usa uma senha inicial conhecida; altere-a antes de cadastrar informações.

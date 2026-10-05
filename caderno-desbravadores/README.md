@@ -13,11 +13,11 @@ Protótipo funcional em React + Vite para o Caderno de Classes.
 - Liderança: visualiza os desbravadores, analisa cada requisito e aprova/devolve com comentário.
 - Regional: visualiza evidências, analisa requisitos aprovados pela liderança e aprova/devolve com comentário; a devolução fica registrada para a liderança.
 - Geração de **Caderno Digital HTML somente do caderno individual** do desbravador, com textos, imagens, vídeos, PDFs e incorporações do YouTube quando disponíveis. Não há geração de relatório administrativo.
-- Persistência local no navegador para a fase de protótipo.
+- Persistência local neste navegador, incluindo anexos, sem conexão a banco remoto.
 
 ## Acesso de teste
 
-Os acessos de teste não são mais exibidos na tela de login. Nesta versão, o acesso inicial do Diretor é `diretor` / `1234`; os demais acessos de teste podem ser consultados e alterados pelo Diretor.
+No primeiro acesso neste navegador, entre como Diretor com `diretor` / `1234` e altere a senha em **Meu acesso**. Os demais acessos podem ser criados e gerenciados pelo Diretor.
 
 ## Executar
 
@@ -35,7 +35,7 @@ npm.cmd run dev
 
 ## Observação sobre o Caderno Digital
 
-A versão atual é um protótipo local para validar telas e fluxo. O Caderno Digital é gerado como um arquivo HTML baixado pelo usuário; ele não é publicado pelo aplicativo nem fica aberto para toda a internet. Para uso real por vários computadores/celulares, a próxima etapa é ligar as mesmas telas ao Supabase: autenticação por usuário/senha, banco, armazenamento de arquivos, regras de segurança por perfil e contas individuais dos desbravadores.
+O Caderno Digital é gerado como um arquivo HTML baixado pelo usuário; ele não é publicado pelo aplicativo nem fica aberto para toda a internet. Contas, atividades e anexos ficam somente no IndexedDB do navegador neste dispositivo. Não há sincronização entre navegadores ou aparelhos.
 
 
 ## v1.0 — ajustes finais antes da publicação
@@ -53,4 +53,4 @@ A versão atual é um protótipo local para validar telas e fluxo. O Caderno Dig
 - A Liderança pode enviar mensagens por requisito mesmo antes do envio de uma atividade.
 - A mensagem da Liderança aparece para o Desbravador e é apagada quando ele reenvia a atividade.
 
-> Importante: esta versão continua usando armazenamento local do navegador. Antes da publicação para uso em vários aparelhos, será necessário conectar o projeto ao Supabase (ou outro backend) para que usuários, arquivos, mensagens e aprovações sejam compartilhados com segurança entre os dispositivos.
+> Importante: os dados ficam neste navegador e podem ser perdidos se os dados do site forem apagados. A conexão com o Supabase foi removida do aplicativo; o projeto remoto e seus dados não foram alterados. O primeiro acesso local do Diretor é `diretor` / `1234`; altere a senha logo após entrar.

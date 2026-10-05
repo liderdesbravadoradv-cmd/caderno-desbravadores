@@ -425,6 +425,7 @@ function EvidencePreview({
 
   useEffect(() => {
     let alive = true;
+    let objectUrl = null;
 
     setUrl(null);
     setLoadError('');
@@ -441,8 +442,12 @@ function EvidencePreview({
 
         const signedUrl = await getEvidencePreviewUrl(path);
 
-        if (!alive) return;
+        if (!alive) {
+          URL.revokeObjectURL(signedUrl);
+          return;
+        }
 
+        objectUrl = signedUrl;
         setUrl(signedUrl);
       } catch (error) {
         console.error(
@@ -464,6 +469,7 @@ function EvidencePreview({
 
     return () => {
       alive = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [file?.path, file?.id]);
 

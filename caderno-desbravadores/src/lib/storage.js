@@ -1,306 +1,331 @@
-import { supabase } from './supabase';
-
-const SESSION_EXPIRES_AT_KEY = 'caderno-desbravadores.session-expires-at';
+const DATABASE_NAME = 'caderno-desbravadores-local';
+const DATABASE_VERSION = 1;
+const STATE_STORE = 'app-state';
+const EVIDENCE_STORE = 'evidence-files';
+const SESSION_KEY = 'caderno-desbravadores.local-session';
 const SESSION_DURATION_MS = 24 * 60 * 60 * 1000;
 
-const seed = {
+const emptyState = () => ({
   users: [],
   submissions: {},
   regionalReviews: {},
   adminReviews: {},
   messages: {}
-};
-
-// ✔ FIX: padronização forte do username → evita login quebrado
-const usernameEmail = (username) =>
-  `${String(username || '')
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, '')}@login.clube.local`;
-
-const normalizeProfile = (row) => ({
-  id: row.id,
-  username: row.username,
-  role: row.role,
-  name: row.name,
-  birth: row.birth_date ? String(row.birth_date).split('-').reverse().join('/') : '',
-  club: row.club || '',
-  unit: row.unit || ''
 });
 
-export async function authenticateUser(username, password) {
-  if (!supabase) throw new Error('Supabase não configurado.');
+let databasePromise;
 
-  const email = usernameEmail(username);
+function openDatabase() {
+  if (typeof indexedDB === 'undefined') {
+    return Promise.reject(new Error('Este navegador não oferece armazenamento local.'));
+  }
 
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password
+  if (!databasePromise) {
+    databasePromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
+
+      request.onupgradeneeded = () => {
+        const database = request.result;
+        if (!database.objectStoreNames.contains(STATE_STORE)) {
+          database.createObjectStore(STATE_STORE, { keyPath: 'id' });
+        }
+        if (!database.objectStoreNames.contains(EVIDENCE_STORE)) {
+          database.createObjectStore(EVIDENCE_STORE, { keyPath: 'id' });
+        }
+      };
+
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+      request.onblocked = () => reject(new Error('Feche outras abas do Caderno e tente novamente.'));
+    }).catch((error) => {
+      databasePromise = null;
+      throw error;
+    });
+  }
+
+  return databasePromise;
+}
+
+function requestResult(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
   });
-
-  if (error || !data?.user) {
-    throw new Error('Usuário ou senha inválidos.');
-  }
-
-  localStorage.setItem(
-    SESSION_EXPIRES_AT_KEY,
-    String(Date.now() + SESSION_DURATION_MS)
-  );
-
-  return loadDB();
 }
 
-export async function restoreAuthenticatedUser() {
-  if (!supabase) return null;
-
-  const expiresAt = Number(localStorage.getItem(SESSION_EXPIRES_AT_KEY));
-
-  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
-    localStorage.removeItem(SESSION_EXPIRES_AT_KEY);
-    await supabase.auth.signOut();
-    return null;
-  }
-
-  const {
-    data: { session }
-  } = await supabase.auth.getSession();
-
-  if (!session?.user) {
-    localStorage.removeItem(SESSION_EXPIRES_AT_KEY);
-    return null;
-  }
-
-  // ✔ FIX: protege contra crash do loadDB
-  let db;
-  try {
-    db = await loadDB();
-  } catch (err) {
-    console.error('Erro loadDB:', err);
-    return null;
-  }
-
-  const user = db?.users?.find((item) => item.id === session.user.id);
-
-  if (!user) {
-    localStorage.removeItem(SESSION_EXPIRES_AT_KEY);
-    await supabase.auth.signOut();
-    return null;
-  }
-
-  return { db, user, expiresAt };
+async function readState() {
+  const database = await openDatabase();
+  const transaction = database.transaction(STATE_STORE, 'readonly');
+  const record = await requestResult(transaction.objectStore(STATE_STORE).get('main'));
+  return record?.value || null;
 }
 
-export function getSessionExpiresAt() {
-  return Number(localStorage.getItem(SESSION_EXPIRES_AT_KEY));
+async function writeState(state) {
+  const database = await openDatabase();
+  const transaction = database.transaction(STATE_STORE, 'readwrite');
+  transaction.objectStore(STATE_STORE).put({ id: 'main', value: state });
+  await new Promise((resolve, reject) => {
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error || new Error('Não foi possível salvar os dados locais.'));
+  });
 }
 
-export async function signOutUser() {
-  localStorage.removeItem(SESSION_EXPIRES_AT_KEY);
-  if (supabase) await supabase.auth.signOut();
+async function ensureState() {
+  const existing = await readState();
+  if (existing) return existing;
+
+  const passwordHash = await hashPassword('1234');
+  const firstRun = {
+    ...emptyState(),
+    users: [{
+      id: 'director-1',
+      username: 'diretor',
+      role: 'DIRECTOR',
+      name: 'Diretor do Clube',
+      birth: '',
+      club: 'Clube Manancial',
+      unit: '',
+      passwordHash
+    }]
+  };
+
+  await writeState(firstRun);
+  return firstRun;
 }
 
-async function getCurrentProfile() {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Sessão não encontrada.');
-
-  const { data, error } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .single();
-
-  if (error) throw error;
-  return data;
+async function hashPassword(password, saltHex) {
+  const encoder = new TextEncoder();
+  const salt = saltHex ? hexToBytes(saltHex) : crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', salt, iterations: 210000, hash: 'SHA-256' }, key, 256);
+  return `${bytesToHex(salt)}:${bytesToHex(new Uint8Array(bits))}`;
 }
 
-async function getVisibleProfiles(current) {
-  let query = supabase.from('profiles').select('*').order('name');
-  if (current.role === 'DESBRAVADOR') query = query.eq('id', current.id);
-  const { data, error } = await query;
-  if (error) throw error;
-  return data || [];
+function bytesToHex(bytes) {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-async function getVisibleStates(current) {
-  let query = supabase.from('club_state').select('profile_id,submissions,messages');
-  if (current.role === 'DESBRAVADOR') query = query.eq('profile_id', current.id);
-  const { data, error } = await query;
-  if (error) throw error;
-  return data || [];
+function hexToBytes(value) {
+  return new Uint8Array(value.match(/.{2}/g).map((byte) => parseInt(byte, 16)));
 }
 
-export async function loadDB() {
-  if (!supabase) return structuredClone(seed);
+async function passwordMatches(password, savedHash) {
+  if (!savedHash) return false;
+  const [salt, expected] = savedHash.split(':');
+  const actual = await hashPassword(password, salt);
+  return actual.split(':')[1] === expected;
+}
 
-  const current = await getCurrentProfile();
-
-  const [profiles, states] = await Promise.all([
-    getVisibleProfiles(current),
-    getVisibleStates(current)
-  ]);
-
-  const submissions = {};
-  const messages = {};
-
-  for (const state of states) {
-    Object.assign(submissions, state.submissions || {});
-    Object.assign(messages, state.messages || {});
-  }
-
+function publicState(state) {
   return {
-    ...seed,
-    users: profiles.map(normalizeProfile),
-    submissions,
-    messages
+    ...state,
+    users: (state.users || []).map(({ passwordHash, ...user }) => user)
   };
 }
 
-export async function saveDB(db) {
-  if (!supabase) return;
-
-  const current = await getCurrentProfile();
-  const profileIds = db.users.map((user) => user.id);
-
-  for (const profileId of profileIds) {
-    if (current.role === 'DESBRAVADOR' && profileId !== current.id) continue;
-
-    const prefix = `${profileId}:`;
-
-    const submissions = Object.fromEntries(
-      Object.entries(db.submissions || {}).filter(([key]) => key.startsWith(prefix))
-    );
-
-    const messages = Object.fromEntries(
-      Object.entries(db.messages || {}).filter(([key]) => key.startsWith(prefix))
-    );
-
-    const { error } = await supabase.from('club_state').upsert({
-      profile_id: profileId,
-      submissions,
-      messages,
-      updated_at: new Date().toISOString()
-    });
-
-    if (error) throw error;
+function sessionData() {
+  try {
+    return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null');
+  } catch {
+    return null;
   }
 }
 
-export async function manageUser(action, payload) {
-  if (!supabase) throw new Error('Supabase não configurado.');
-
-  const { data, error } = await supabase.functions.invoke('manage-user', {
-    body: { action, ...payload }
-  });
-
-  if (error) throw new Error(error.message || 'Erro na função.');
-  if (data?.error) throw new Error(data.error);
-
-  return data;
+function normalizeUsername(username) {
+  return String(username || '').trim().toLowerCase().replace(/\s+/g, '');
 }
 
-const safeName = (name) =>
-  String(name || 'arquivo')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-zA-Z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'arquivo';
+export async function authenticateUser(username, password) {
+  const state = await ensureState();
+  const normalized = normalizeUsername(username);
+  const user = state.users.find((item) => normalizeUsername(item.username) === normalized);
+
+  if (!user || !(await passwordMatches(password, user.passwordHash))) {
+    throw new Error('Usuário ou senha inválidos.');
+  }
+
+  const expiresAt = Date.now() + SESSION_DURATION_MS;
+  localStorage.setItem(SESSION_KEY, JSON.stringify({ userId: user.id, expiresAt }));
+  return publicState(state);
+}
+
+export async function restoreAuthenticatedUser() {
+  const session = sessionData();
+  if (!session || !Number.isFinite(session.expiresAt) || session.expiresAt <= Date.now()) {
+    localStorage.removeItem(SESSION_KEY);
+    return null;
+  }
+
+  const state = await ensureState();
+  const user = state.users.find((item) => item.id === session.userId);
+  if (!user) {
+    localStorage.removeItem(SESSION_KEY);
+    return null;
+  }
+
+  return { db: publicState(state), user: publicState({ users: [user] }).users[0], expiresAt: session.expiresAt };
+}
+
+export function getSessionExpiresAt() {
+  return Number(sessionData()?.expiresAt);
+}
+
+export async function signOutUser() {
+  localStorage.removeItem(SESSION_KEY);
+}
+
+export async function loadDB() {
+  return publicState(await ensureState());
+}
+
+export async function saveDB(db) {
+  const current = await ensureState();
+  const passwordById = new Map(current.users.map((user) => [user.id, user.passwordHash]));
+  const nextUsers = (db.users || []).map((user) => ({
+    ...user,
+    passwordHash: passwordById.get(user.id)
+  }));
+  await writeState({ ...emptyState(), ...db, users: nextUsers });
+}
+
+async function currentUser() {
+  const session = sessionData();
+  if (!session || session.expiresAt <= Date.now()) throw new Error('Sessão expirada. Entre novamente.');
+  const state = await ensureState();
+  const user = state.users.find((item) => item.id === session.userId);
+  if (!user) throw new Error('Sessão não encontrada.');
+  return { state, user };
+}
+
+export async function manageUser(action, payload = {}) {
+  const { state, user: actor } = await currentUser();
+  if (actor.role !== 'DIRECTOR') throw new Error('Somente o Diretor pode gerenciar acessos.');
+
+  const userId = payload.userId || null;
+  const target = state.users.find((item) => item.id === userId);
+
+  if (action === 'create') {
+    const username = normalizeUsername(payload.username);
+    if (!username || !payload.password) throw new Error('Informe usuário e senha.');
+    if (state.users.some((item) => normalizeUsername(item.username) === username)) {
+      throw new Error('Este nome de usuário já está cadastrado.');
+    }
+
+    const newUser = {
+      id: crypto.randomUUID(),
+      username,
+      role: payload.role,
+      name: payload.name,
+      birth: payload.birth || '',
+      club: payload.club || '',
+      unit: payload.unit || '',
+      passwordHash: await hashPassword(payload.password)
+    };
+    await writeState({ ...state, users: [...state.users, newUser] });
+    return { ok: true };
+  }
+
+  if (!target) throw new Error('O acesso não foi encontrado.');
+
+  if (action === 'update') {
+    const username = normalizeUsername(payload.username ?? target.username);
+    if (!username) throw new Error('Informe um nome de usuário.');
+    if (state.users.some((item) => item.id !== target.id && normalizeUsername(item.username) === username)) {
+      throw new Error('Este nome de usuário já está cadastrado.');
+    }
+    const updated = {
+      ...target,
+      username,
+      name: payload.name ?? target.name,
+      role: payload.role ?? target.role,
+      birth: payload.birth ?? target.birth,
+      club: payload.club ?? target.club,
+      unit: payload.unit ?? target.unit,
+      passwordHash: payload.password ? await hashPassword(payload.password) : target.passwordHash
+    };
+    await writeState({ ...state, users: state.users.map((item) => item.id === target.id ? updated : item) });
+    return { ok: true };
+  }
+
+  if (action === 'delete') {
+    if (target.id === 'director-1') throw new Error('O acesso principal do Diretor não pode ser excluído.');
+    const prefix = `${target.id}:`;
+    const submissions = Object.fromEntries(Object.entries(state.submissions || {}).filter(([key]) => !key.startsWith(prefix)));
+    const messages = Object.fromEntries(Object.entries(state.messages || {}).filter(([key]) => !key.startsWith(prefix)));
+    const files = (await listEvidenceFiles()).filter((file) => file.ownerId === target.id);
+    await Promise.all(files.map((file) => deleteEvidenceFile(file.id)));
+    await writeState({
+      ...state,
+      users: state.users.filter((item) => item.id !== target.id),
+      submissions,
+      messages
+    });
+    return { ok: true };
+  }
+
+  throw new Error('Ação de acesso não reconhecida.');
+}
+
+function safeName(name) {
+  return String(name || 'arquivo').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'arquivo';
+}
+
+async function listEvidenceFiles() {
+  const database = await openDatabase();
+  const transaction = database.transaction(EVIDENCE_STORE, 'readonly');
+  return requestResult(transaction.objectStore(EVIDENCE_STORE).getAll());
+}
 
 export async function getEvidenceFile(id) {
-  if (!supabase) throw new Error('Supabase não configurado.');
-
-  const path = String(id || '').trim();
-  if (!path) throw new Error('Arquivo inválido.');
-
-  const { data, error } = await supabase.storage
-    .from('evidence')
-    .download(path);
-
-  if (error) throw error;
-  if (!data) throw new Error('O arquivo não foi encontrado.');
-
-  return { blob: data };
+  const database = await openDatabase();
+  const transaction = database.transaction(EVIDENCE_STORE, 'readonly');
+  const file = await requestResult(transaction.objectStore(EVIDENCE_STORE).get(String(id || '')));
+  if (!file?.blob) throw new Error('O arquivo não foi encontrado neste dispositivo.');
+  return { blob: file.blob };
 }
 
 export async function getEvidencePreviewUrl(id) {
-  if (!supabase) throw new Error('Supabase não configurado.');
-
-  const path = String(id || '').trim();
-  if (!path) throw new Error('Arquivo inválido.');
-
-  // O bucket é privado. A URL assinada preserva essa proteção e permite que
-  // o navegador carregue a mídia sem aguardar o download completo em memória.
-  const { data, error } = await supabase.storage
-    .from('evidence')
-    .createSignedUrl(path, 60 * 60);
-
-  if (error) throw error;
-  if (!data?.signedUrl) {
-    throw new Error('Não foi possível criar a visualização do arquivo.');
-  }
-
-  return data.signedUrl;
+  const { blob } = await getEvidenceFile(id);
+  return URL.createObjectURL(blob);
 }
 
 export async function saveEvidenceFiles(files, key) {
   if (!files?.length) return [];
-  if (!supabase) throw new Error('Supabase não configurado.');
-
-  const parts = String(key).split(':');
-  if (parts.length !== 3 || parts.some((part) => !part)) {
-    throw new Error('Identificador do requisito inválido.');
-  }
-
-  const [scoutId, classSlug, itemId] = parts;
+  const [ownerId, classSlug, itemId] = String(key).split(':');
+  if (!ownerId || !classSlug || !itemId) throw new Error('Identificador do requisito inválido.');
+  const database = await openDatabase();
   const saved = [];
 
   try {
     for (const file of files) {
-      const id = crypto.randomUUID();
-      const path = `${scoutId}/${classSlug}/${itemId}/${id}-${safeName(file.name)}`;
-
-      const { error } = await supabase.storage
-        .from('evidence')
-        .upload(path, file, {
-          contentType: file.type || 'application/octet-stream',
-          upsert: false
-        });
-
-      if (error) throw error;
-
-      saved.push({
-        id: path,
-        path,
-        name: file.name,
-        type: file.type,
-        size: file.size,
-        createdAt: new Date().toISOString()
+      const id = `${ownerId}/${classSlug}/${itemId}/${crypto.randomUUID()}-${safeName(file.name)}`;
+      const transaction = database.transaction(EVIDENCE_STORE, 'readwrite');
+      transaction.objectStore(EVIDENCE_STORE).put({ id, ownerId, blob: file });
+      await new Promise((resolve, reject) => {
+        transaction.oncomplete = resolve;
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error || new Error('Não foi possível salvar o arquivo neste dispositivo.'));
       });
+      saved.push({ id, path: id, name: file.name, type: file.type, size: file.size, createdAt: new Date().toISOString() });
     }
+    return saved;
   } catch (error) {
-    // Se uma das várias evidências falhar, não deixa as anteriores
-    // abandonadas no Storage.
-    if (saved.length) {
-      await supabase.storage
-        .from('evidence')
-        .remove(saved.map((file) => file.path));
-    }
+    await Promise.allSettled(saved.map((file) => deleteEvidenceFile(file.id)));
     throw error;
   }
-
-  return saved;
 }
 
 export async function deleteEvidenceFile(id) {
-  if (!supabase) return;
-
   const path = String(id || '').trim();
-  if (!path) throw new Error('Arquivo inválido.');
-
-  const { data, error } = await supabase.functions.invoke('manage-user', {
-    body: { action: 'delete-evidence', path }
+  if (!path) return;
+  const database = await openDatabase();
+  const transaction = database.transaction(EVIDENCE_STORE, 'readwrite');
+  transaction.objectStore(EVIDENCE_STORE).delete(path);
+  await new Promise((resolve, reject) => {
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error || new Error('Não foi possível excluir o arquivo local.'));
   });
-
-  if (error) throw new Error(error.message);
-  if (data?.error) throw new Error(data.error);
-  if (!data?.ok) throw new Error('Arquivo não excluído.');
 }
