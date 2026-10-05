@@ -182,30 +182,31 @@ export async function generateDigitalNotebook({ scout, classes, submissions }) {
       <style>
         body{font-family:Arial,sans-serif;background:#f4f6f8;color:#243342;margin:0}
         .wrap{max-width:1000px;margin:auto;background:#fff;min-height:100vh}
-        .cover{padding:70px 60px;text-align:center;background:linear-gradient(135deg,#eef5fb,#fff);border-bottom:1px solid #dbe4ec}
-        .cover h1{font-size:38px;margin:8px}.cover p{color:#667}
-        .identity{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;text-align:left;max-width:650px;margin:35px auto 0}
-        .identity div{padding:12px;border:1px solid #e1e8ef;border-radius:10px}
-        .checklist-overview{padding:28px 35px;page-break-before:always;page-break-after:always}
-        .checklist-overview h2{margin:0 0 14px;color:#173f73;font-size:25px}
+        .cover{padding:42px 44px;text-align:center;background:linear-gradient(135deg,#eef5fb,#fff);border-bottom:1px solid #dbe4ec}
+        .cover h1{font-size:38px;margin:5px 0 18px}.cover p{color:#667;margin:4px 0}
+        .identity{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;text-align:left;max-width:650px;margin:20px auto 0}
+        .identity div{padding:8px;border:1px solid #e1e8ef;border-radius:10px}
+        .checklist-overview{padding:18px 24px;page-break-before:always;page-break-after:always}
+        .checklist-overview h2{margin:0 0 9px;color:#173f73;font-size:25px}
         .checklist-overview img{display:block;width:100%;height:auto;max-height:980px;object-fit:contain}
-        .class{padding:35px 55px;page-break-before:always}
-        .class-title{padding:20px;border-radius:16px;background:#eaf2f8}
+        .class{padding:24px 40px;page-break-before:always}
+        .class-title{padding:14px;border-radius:16px;background:#eaf2f8}
         .class-title span,.class-title small{display:block;color:#607487}
-        .class-title strong{font-size:30px;display:block;margin:3px 0 5px}
-        .class section{margin-top:28px}.class section>h2{font-size:21px;border-bottom:2px solid #dce5ed;padding-bottom:8px}
-        .req{display:grid;grid-template-columns:42px 1fr;gap:15px;padding:20px 0;border-bottom:1px solid #e5ebf0}
+        .class-title strong{font-size:28px;display:block;margin:2px 0 3px}
+        .class section{margin-top:17px}.class section>h2{font-size:20px;border-bottom:2px solid #dce5ed;padding-bottom:5px;margin:0 0 6px}
+        .req{display:grid;grid-template-columns:42px 1fr;gap:11px;padding:13px 0;border-bottom:1px solid #e5ebf0}
         .num{font-weight:700;font-size:18px;background:#eef3f7;border-radius:10px;width:42px;height:42px;display:grid;place-items:center}
-        .rid{font-size:12px;color:#758797;text-transform:uppercase}.req h3{margin:5px 0 10px}
-        .meta{font-size:13px;color:#5f7384;margin:10px 0}
-        .answer{background:#fafbfd;border:1px solid #e1e8ef;border-radius:10px;padding:12px}
-        .photo{display:block;max-width:100%;max-height:650px;margin:10px 0;border-radius:10px}
-        .video{display:block;width:100%;max-height:650px;margin:10px 0;border-radius:10px;background:#000}
+        .rid{font-size:12px;color:#758797;text-transform:uppercase}.req h3{margin:3px 0 7px}
+        .meta{font-size:13px;color:#5f7384;margin:6px 0}
+        .answer{background:#fafbfd;border:1px solid #e1e8ef;border-radius:10px;padding:9px}
+        .answer p{margin:5px 0}
+        .photo{display:block;max-width:100%;max-height:650px;margin:6px 0;border-radius:10px}
+        .video{display:block;width:100%;max-height:650px;margin:6px 0;border-radius:10px;background:#000}
         .youtube iframe{width:100%;height:420px;border:0;border-radius:10px}
-        .pdf{display:block;padding:12px;background:#f2f6f9;border-radius:8px;margin:8px 0;color:#245b82;text-decoration:none}
-        .empty{text-align:center;color:#778896;padding:30px}
-        @media print{body{background:#fff}.wrap{max-width:none}.checklist-overview{padding:10mm 8mm}.checklist-overview img{max-height:260mm}.class{padding:25px 35px}}
-        @media(max-width:600px){.cover{padding:40px 20px}.checklist-overview{padding:18px 12px}.class{padding:25px 20px}}
+        .pdf{display:block;padding:9px;background:#f2f6f9;border-radius:8px;margin:5px 0;color:#245b82;text-decoration:none}
+        .empty{text-align:center;color:#778896;padding:18px}
+        @media print{body{background:#fff}.wrap{max-width:none}.checklist-overview{padding:8mm 6mm}.checklist-overview img{max-height:260mm}.class{padding:18px 28px}}
+        @media(max-width:600px){.cover{padding:30px 16px}.checklist-overview{padding:14px 10px}.class{padding:18px 14px}}
       </style>
     </head>
     <body><div class="wrap">

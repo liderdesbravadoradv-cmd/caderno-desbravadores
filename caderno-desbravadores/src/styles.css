@@ -18,3 +18,84 @@
 .file-delete-button{margin-top:6px;border:1px solid #d7a4a4;background:#fff5f5;color:#9a3d3d;border-radius:6px;padding:4px 7px;font-size:11px;font-weight:700}.file-delete-button:disabled{opacity:.6;cursor:wait}.file-order-hint{margin:8px 0;color:#667487;font-size:12px}
 
 .file-loading.file-error{display:grid;gap:6px;background:#fff8f8;border-color:#e6bcbc;color:#8d3d3d}.file-loading.file-error span{font-size:11px;color:#a35a5a}
+
+/* Compacta os espaços sem mudar a estrutura das telas. */
+.topbar{min-height:58px;padding-top:7px;padding-bottom:7px;gap:14px}
+.top-actions{gap:7px}
+.page{margin-top:16px;margin-bottom:40px}
+.cover{min-height:480px;padding-top:32px;padding-bottom:32px}
+.cover h1{margin-bottom:18px}
+.emblem{margin-bottom:26px}
+.identity{padding:12px 18px}
+.identity div{gap:9px;padding:7px 0}
+.checklist-section{margin-top:18px}
+.section-title{gap:12px;margin-bottom:9px}
+.checklist-grid{gap:9px}
+.check-card{padding:11px}
+.check-grid{gap:3px;margin:8px 0}
+.section-checklist{margin:7px 0 8px;gap:5px}
+.toolbar{margin-top:18px;padding:12px 14px;gap:10px}
+.toolbar span{margin-top:2px}
+.class-page{margin-top:16px}
+.class-banner{gap:12px;padding:16px 20px;border-left-width:7px}
+.section-nav{gap:5px;margin:9px 0 16px}
+.section-nav button{padding:6px 9px}
+.requirement-section{margin:15px 0}
+.section-heading{padding:10px 14px}
+.requirement{min-height:0}
+.req-number{padding-top:12px}
+.req-content{padding:12px 15px 13px 2px}
+.req-content h3{margin-bottom:6px;line-height:1.4}
+.req-content ul{margin:6px 0 8px;padding-left:18px;line-height:1.45}
+.scout-requirement.is-collapsed .req-content{padding-bottom:11px}
+.status-row{gap:6px}
+.evidence-form{margin-top:11px;padding-top:9px;gap:8px}
+.form-row{gap:9px}
+.evidence-form input,.evidence-form textarea,.login-card input,.compact select,.review-box textarea{padding:8px}
+.file-list{gap:5px}
+.file-list span,.file-pill{padding:5px 7px}
+.review-box{margin-top:9px;padding:10px}
+.review-actions{gap:6px;margin-top:6px}
+.panel{padding:3px}
+.panel-head{gap:14px;padding:15px}
+.summary-grid{gap:6px;margin:9px 0}
+.summary-card{padding:8px}
+.admin-note,.regional-note{margin-bottom:11px;padding:9px 11px}
+.login-card{padding:24px}
+.login-mark{margin-bottom:12px}
+.muted{margin-bottom:15px}
+.login-card form{gap:10px}
+.account-manager{margin-bottom:18px}
+.account-list{gap:6px;margin:10px 0}
+.account-row{gap:12px;padding:10px}
+.search,.scout-picker input{padding:9px 11px}
+.scout-picker{gap:6px}
+.class-selector{margin:10px 0;padding:10px}
+.class-selector-grid{gap:5px;margin-top:6px}
+.class-tab{padding:7px 5px}
+.visible-answer{margin-top:10px;gap:8px}
+.answer-text{padding:10px}
+.answer-text p{margin-top:5px;line-height:1.5}
+.evidence-gallery{gap:7px}
+.file-card{gap:8px;padding:8px;margin:6px 0}
+.evidence-preview{margin:9px 0}
+.director-settings{margin-bottom:18px;padding:12px}
+.director-settings-form{gap:8px}
+.new-scout{margin-bottom:11px;padding:10px}
+.new-scout form{gap:8px;margin-top:9px;padding:10px 0}
+.new-scout .form-row{gap:6px}
+.message-notice{margin-top:7px;padding:8px 10px}
+.leadership-message-box{margin-top:10px;padding:10px}
+.sent-message{margin:6px 0;padding:6px 8px}
+footer{padding:18px}
+
+@media(max-width:560px){
+  .page{margin-top:10px;margin-bottom:28px}
+  .cover{min-height:420px;padding-top:24px;padding-bottom:24px}
+  .identity{padding:10px 12px}
+  .class-banner{padding:12px 14px;gap:9px}
+  .section-nav{margin-bottom:11px}
+  .req-content{padding-right:10px;padding-top:10px;padding-bottom:11px}
+  .panel-head{padding:12px}
+  .account-row{align-items:flex-start}
+}
