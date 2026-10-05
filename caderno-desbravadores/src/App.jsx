@@ -849,7 +849,7 @@ function EvidenceForm({
           Adicionar arquivos
           <input
             type="file"
-            accept="image/*,application/pdf"
+            accept="image/*,application/pdf,video/*"
             multiple
             onChange={(event) => {
               const selected =
@@ -867,9 +867,9 @@ function EvidenceForm({
           />
 
           <small>
-            Você pode acrescentar quantos
-            arquivos quiser. Vídeos devem ser
-            enviados pelo link do YouTube.
+            Você pode acrescentar imagens, PDFs
+            e vídeos. Links do YouTube também
+            continuam disponíveis.
           </small>
         </label>
       </div>
