@@ -1,4 +1,5 @@
 import { getEvidenceFile } from './storage';
+import { getClassChecklistLabel } from '../data/classes';
 
 const esc = (value = '') => String(value).replace(/[&<>"']/g, (character) => ({
   '&': '&amp;',
@@ -81,7 +82,7 @@ function createChecklistSvg(classes, submissions) {
       <rect x="${x}" y="${y}" width="${cardWidth}" height="${cardHeight}" rx="16" fill="#fff" stroke="${esc(classData.color)}" stroke-width="3"/>
       <rect x="${x}" y="${y}" width="${cardWidth}" height="46" rx="14" fill="${esc(classData.color)}"/>
       <path d="M${x} ${y + 32}h${cardWidth}v14h-${cardWidth}z" fill="${esc(classData.color)}"/>
-      <text x="${x + 18}" y="${y + 30}" class="class-name">${esc(classData.name)}</text>
+      <text x="${x + 18}" y="${y + 30}" class="class-name">${esc(getClassChecklistLabel(classData))}</text>
       <text x="${x + cardWidth - 18}" y="${y + 29}" class="count" text-anchor="end">${completed}/${requirements.length}</text>
       <text x="${x + 20}" y="${y + 64}" class="percent">${percent}% aprovado pela diretoria</text>
       <rect x="${x + 20}" y="${y + 70}" width="${cardWidth - 40}" height="6" rx="3" fill="#e7edf3"/>

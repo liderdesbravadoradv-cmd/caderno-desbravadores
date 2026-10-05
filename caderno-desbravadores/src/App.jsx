@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   classes,
   classMap,
+  getClassChecklistLabel,
   flattenRequirements
 } from './data/classes';
 
@@ -340,7 +341,7 @@ function Checklist({
               >
                 <div className="check-head">
                   <span className="check-name">
-                    {classData.name}
+                    {getClassChecklistLabel(classData)}
                   </span>
 
                   <span>

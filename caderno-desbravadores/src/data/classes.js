@@ -140,6 +140,20 @@ export const classes = [
 
 export const classMap = Object.fromEntries(classes.map(c => [c.slug, c]));
 
+const classMinimumAges = {
+  amigo: 10,
+  companheiro: 11,
+  pesquisador: 12,
+  pioneiro: 13,
+  excursionista: 14,
+  guia: 15
+};
+
+export function getClassChecklistLabel(classData) {
+  const age = classMinimumAges[classData.slug];
+  return age ? `${classData.name} - ${age}` : classData.name;
+}
+
 export function flattenRequirements(classData) {
   return classData.requirements.flatMap(([section, items]) => items.map(item => ({ ...item, section })));
 }
