@@ -24,14 +24,11 @@ const blobData = (blob) => new Promise((resolve, reject) => {
 
 function createChecklistSvg(classes, submissions) {
   const width = 1000;
-  const height = 1280;
   const cardWidth = 470;
-  const cardHeight = 340;
   const columns = 10;
   const cellWidth = 43;
-  const cardMarkup = classes.map((classData, classIndex) => {
-    const x = 20 + (classIndex % 2) * 490;
-    const y = 160 + Math.floor(classIndex / 2) * 360;
+  const cellHeight = 22;
+  const cards = classes.map((classData) => {
     const requirements = classData.requirements.flatMap(([section, items]) =>
       items.map((item) => ({ ...item, section }))
     );
@@ -41,29 +38,54 @@ function createChecklistSvg(classes, submissions) {
     }).length;
     const percent = requirements.length ? Math.round((completed / requirements.length) * 100) : 0;
     const rows = Math.ceil(requirements.length / columns);
-    const cellHeight = Math.min(34, (cardHeight - 115) / Math.max(rows, 1));
+    return {
+      classData,
+      requirements,
+      completed,
+      percent,
+      rows,
+      cardHeight: 95 + rows * cellHeight
+    };
+  });
+
+  const rowPositions = [];
+  let nextCardY = 86;
+  for (let index = 0; index < cards.length; index += 2) {
+    const rowHeight = Math.max(cards[index].cardHeight, cards[index + 1]?.cardHeight || 0);
+    rowPositions.push({ y: nextCardY, height: rowHeight });
+    nextCardY += rowHeight + 12;
+  }
+  const legendY = nextCardY - 12 + 12;
+  const height = legendY + 34;
+
+  const cardMarkup = cards.map((card, classIndex) => {
+    const { classData, requirements, completed, percent, rows } = card;
+    const x = 20 + (classIndex % 2) * 490;
+    const row = rowPositions[Math.floor(classIndex / 2)];
+    const y = row.y;
+    const cardHeight = row.height;
     const checks = requirements.map((item, index) => {
       const isComplete = ['adminApproved', 'regionalApproved'].includes(
         submissions[`${classData.slug}:${item.id}`]?.status
       );
       const cellX = x + 20 + (index % columns) * cellWidth;
-      const cellY = y + 102 + Math.floor(index / columns) * cellHeight;
+      const cellY = y + 86 + Math.floor(index / columns) * cellHeight;
       const color = esc(classData.color);
       const mark = isComplete
-        ? `<rect x="${cellX}" y="${cellY}" width="15" height="15" rx="3" fill="${color}"/><path d="M${cellX + 3} ${cellY + 8}l3 3 6-7" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`
-        : `<rect x="${cellX}" y="${cellY}" width="15" height="15" rx="3" fill="#fff" stroke="#aab6c2" stroke-width="1.5"/>`;
-      return `${mark}<text x="${cellX + 20}" y="${cellY + 12}" class="item-label">${esc(item.sectionCode)}-${esc(item.number)}</text>`;
+        ? `<rect x="${cellX}" y="${cellY}" width="14" height="14" rx="3" fill="${color}"/><path d="M${cellX + 3} ${cellY + 7}l3 3 5-6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>`
+        : `<rect x="${cellX}" y="${cellY}" width="14" height="14" rx="3" fill="#fff" stroke="#aab6c2" stroke-width="1.3"/>`;
+      return `${mark}<text x="${cellX + 18}" y="${cellY + 11}" class="item-label">${esc(item.sectionCode)}-${esc(item.number)}</text>`;
     }).join('');
 
     return `<g>
       <rect x="${x}" y="${y}" width="${cardWidth}" height="${cardHeight}" rx="16" fill="#fff" stroke="${esc(classData.color)}" stroke-width="3"/>
-      <rect x="${x}" y="${y}" width="${cardWidth}" height="58" rx="14" fill="${esc(classData.color)}"/>
-      <path d="M${x} ${y + 44}h${cardWidth}v14h-${cardWidth}z" fill="${esc(classData.color)}"/>
-      <text x="${x + 18}" y="${y + 37}" class="class-name">${esc(classData.name)}</text>
-      <text x="${x + cardWidth - 18}" y="${y + 36}" class="count" text-anchor="end">${completed}/${requirements.length}</text>
-      <text x="${x + 20}" y="${y + 82}" class="percent">${percent}% aprovado pela diretoria</text>
-      <rect x="${x + 20}" y="${y + 88}" width="${cardWidth - 40}" height="7" rx="4" fill="#e7edf3"/>
-      <rect x="${x + 20}" y="${y + 88}" width="${(cardWidth - 40) * percent / 100}" height="7" rx="4" fill="${esc(classData.color)}"/>
+      <rect x="${x}" y="${y}" width="${cardWidth}" height="46" rx="14" fill="${esc(classData.color)}"/>
+      <path d="M${x} ${y + 32}h${cardWidth}v14h-${cardWidth}z" fill="${esc(classData.color)}"/>
+      <text x="${x + 18}" y="${y + 30}" class="class-name">${esc(classData.name)}</text>
+      <text x="${x + cardWidth - 18}" y="${y + 29}" class="count" text-anchor="end">${completed}/${requirements.length}</text>
+      <text x="${x + 20}" y="${y + 64}" class="percent">${percent}% aprovado pela diretoria</text>
+      <rect x="${x + 20}" y="${y + 70}" width="${cardWidth - 40}" height="6" rx="3" fill="#e7edf3"/>
+      <rect x="${x + 20}" y="${y + 70}" width="${(cardWidth - 40) * percent / 100}" height="6" rx="3" fill="${esc(classData.color)}"/>
       ${checks}
     </g>`;
   }).join('');
@@ -71,23 +93,23 @@ function createChecklistSvg(classes, submissions) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Checklist de progresso das seis classes">
     <style>
       text{font-family:Arial,Helvetica,sans-serif;fill:#243342}
-      .title{font-size:27px;font-weight:700;fill:#173f73}
-      .subtitle{font-size:15px;fill:#617386}
-      .class-name{font-size:23px;font-weight:700;fill:#fff}
-      .count{font-size:20px;font-weight:700;fill:#fff}
-      .percent{font-size:15px;fill:#53677a}
-      .item-label{font-size:11px;fill:#405367}
+      .title{font-size:24px;font-weight:700;fill:#173f73}
+      .subtitle{font-size:13px;fill:#617386}
+      .class-name{font-size:20px;font-weight:700;fill:#fff}
+      .count{font-size:18px;font-weight:700;fill:#fff}
+      .percent{font-size:13px;fill:#53677a}
+      .item-label{font-size:10px;fill:#405367}
     </style>
     <rect width="100%" height="100%" fill="#f4f6f8"/>
-    <text x="20" y="54" class="title">Progresso das classes</text>
-    <text x="20" y="78" class="subtitle">Itens marcados foram aprovados pela diretoria.</text>
+    <text x="20" y="36" class="title">Progresso das classes</text>
+    <text x="20" y="57" class="subtitle">Itens marcados foram aprovados pela diretoria.</text>
     ${cardMarkup}
-    <g transform="translate(21 1248)">
-      <rect width="15" height="15" rx="3" fill="#14509a"/>
-      <path d="M3 8l3 3 6-7" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-      <text x="23" y="12" class="subtitle">Aprovado</text>
-      <rect x="132" width="15" height="15" rx="3" fill="#fff" stroke="#aab6c2" stroke-width="1.5"/>
-      <text x="155" y="12" class="subtitle">Pendente ou em análise</text>
+    <g transform="translate(21 ${legendY})">
+      <rect width="14" height="14" rx="3" fill="#14509a"/>
+      <path d="M3 7l3 3 5-6" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="21" y="11" class="subtitle">Aprovado</text>
+      <rect x="118" width="14" height="14" rx="3" fill="#fff" stroke="#aab6c2" stroke-width="1.3"/>
+      <text x="139" y="11" class="subtitle">Pendente ou em análise</text>
     </g>
   </svg>`;
 }
