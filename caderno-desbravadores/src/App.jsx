@@ -424,6 +424,15 @@ function EvidencePreview({
   const [loadError, setLoadError] = useState('');
   const [deleting, setDeleting] = useState(false);
 
+  const fileName = String(file?.name || 'arquivo');
+  const fileType = String(file?.type || '').toLowerCase();
+  const extension = fileName.split('.').pop()?.toLowerCase();
+  const imageByExtension = [
+    'avif', 'bmp', 'gif', 'jpeg', 'jpg', 'png', 'svg', 'webp'
+  ].includes(extension);
+  const isImage = fileType.startsWith('image/') || imageByExtension;
+  const isPdf = fileType === 'application/pdf' || extension === 'pdf';
+
   useEffect(() => {
     let alive = true;
     let objectUrl = null;
@@ -482,6 +491,19 @@ function EvidencePreview({
         <span>
           {loadError}
         </span>
+
+        {url && (
+          <a
+            className="file-open-link"
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            download={file.name}
+            onClick={(event) => event.stopPropagation()}
+          >
+            Abrir ou baixar arquivo
+          </a>
+        )}
 
         {canDelete && (
           <button
@@ -551,7 +573,7 @@ function EvidencePreview({
     </button>
   ) : null;
 
-  if (file.type?.startsWith('image/')) {
+  if (isImage) {
     return (
       <div
         className="evidence-preview"
@@ -591,7 +613,7 @@ function EvidencePreview({
     );
   }
 
-  if (file.type === 'application/pdf') {
+  if (isPdf) {
     return (
       <div
         className="evidence-preview"

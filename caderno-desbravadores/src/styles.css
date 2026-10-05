@@ -99,3 +99,4 @@ footer{padding:18px}
   .panel-head{padding:12px}
   .account-row{align-items:flex-start}
 }
+ .file-open-link{width:max-content;color:#245b91;font-size:11px;font-weight:700;text-decoration:underline}
