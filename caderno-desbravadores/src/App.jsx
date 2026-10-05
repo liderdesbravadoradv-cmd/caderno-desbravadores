@@ -540,6 +540,7 @@ function EvidencePreview({
     event.stopPropagation();
 
   const remove = async (event) => {
+    event.preventDefault();
     event.stopPropagation();
 
     if (!canDelete || deleting) return;
@@ -632,25 +633,27 @@ function EvidencePreview({
   }
 
   return (
-    <a
-      className="file-card"
-      href={url}
-      download={file.name}
-      onClick={stop}
-    >
-      📎
+    <div className="file-card">
+      <a
+        className="file-card-link"
+        href={url}
+        download={file.name}
+        onClick={stop}
+      >
+        📎
 
-      <span>
-        <b>{file.name}</b>
+        <span>
+          <b>{file.name}</b>
 
-        <small>
-          {file.type || 'arquivo'}{' '}
-          {formatBytes(file.size)}
-        </small>
-      </span>
+          <small>
+            {file.type || 'arquivo'}{' '}
+            {formatBytes(file.size)}
+          </small>
+        </span>
+      </a>
 
       {deleteButton}
-    </a>
+    </div>
   );
 }
 
