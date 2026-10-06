@@ -1,4 +1,4 @@
-import { getEvidenceFile } from './storage';
+import { getEvidenceFile, getEvidenceFileStream } from './storage';
 import { getClassChecklistLabel } from '../data/classes';
 
 const esc = (value = '') => String(value).replace(/[&<>"']/g, (character) => ({
@@ -115,7 +115,117 @@ function createChecklistSvg(classes, submissions) {
   </svg>`;
 }
 
+async function writeBase64Stream(writable, stream) {
+  const reader = stream.getReader();
+  let remainder = new Uint8Array(0);
+  const encodeBytes = (bytes) => {
+    let binary = '';
+    const step = 48 * 1024;
+    for (let offset = 0; offset < bytes.length; offset += step) {
+      binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + step, bytes.length)));
+    }
+    return btoa(binary);
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const bytes = new Uint8Array(remainder.length + value.length);
+    bytes.set(remainder);
+    bytes.set(value, remainder.length);
+    const completeLength = bytes.length - (bytes.length % 3);
+    for (let offset = 0; offset < completeLength; offset += 48 * 1024) {
+      await writable.write(encodeBytes(bytes.subarray(offset, Math.min(offset + 48 * 1024, completeLength))));
+    }
+    remainder = bytes.slice(completeLength);
+  }
+  if (remainder.length) await writable.write(encodeBytes(remainder));
+}
+
+async function writeLargeNotebook({ scout, classes, submissions, checklistImage, writable, onProgress, fileCount, totalBytes, totalJobs }) {
+  const styles = `body{font-family:Arial,sans-serif;background:#f4f6f8;color:#243342;margin:0}.wrap{max-width:1000px;margin:auto;background:#fff;min-height:100vh}.cover{padding:42px 44px;text-align:center;background:linear-gradient(135deg,#eef5fb,#fff);border-bottom:1px solid #dbe4ec}.cover h1{font-size:38px;margin:5px 0 18px}.cover p{color:#667;margin:4px 0}.identity{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;text-align:left;max-width:650px;margin:20px auto 0}.identity div{padding:8px;border:1px solid #e1e8ef;border-radius:10px}.checklist-overview{padding:18px 24px;page-break-before:always;page-break-after:always}.checklist-overview h2{margin:0 0 9px;color:#173f73;font-size:25px}.checklist-overview img{display:block;width:100%;height:auto;max-height:980px;object-fit:contain}.class{padding:24px 40px;page-break-before:always}.class-title{padding:14px;border-radius:16px;background:#eaf2f8}.class-title span,.class-title small{display:block;color:#607487}.class-title strong{font-size:28px;display:block;margin:2px 0 3px}.class section{margin-top:17px}.class section>h2{font-size:20px;border-bottom:2px solid #dce5ed;padding-bottom:5px;margin:0 0 6px}.req{display:grid;grid-template-columns:42px 1fr;gap:11px;padding:13px 0;border-bottom:1px solid #e5ebf0}.num{font-weight:700;font-size:18px;background:#eef3f7;border-radius:10px;width:42px;height:42px;display:grid;place-items:center}.rid{font-size:12px;color:#758797;text-transform:uppercase}.req h3{margin:3px 0 7px}.meta{font-size:13px;color:#5f7384;margin:6px 0}.answer{background:#fafbfd;border:1px solid #e1e8ef;border-radius:10px;padding:9px}.answer p{margin:5px 0}.photo{display:block;max-width:100%;max-height:650px;margin:6px 0;border-radius:10px}.video{display:block;width:100%;max-height:650px;margin:6px 0;border-radius:10px;background:#000}.youtube iframe{width:100%;height:420px;border:0;border-radius:10px}.pdf{display:block;padding:9px;background:#f2f6f9;border-radius:8px;margin:5px 0;color:#245b82;text-decoration:none}.empty{text-align:center;color:#778896;padding:18px}@media print{body{background:#fff}.wrap{max-width:none}.checklist-overview{padding:8mm 6mm}.checklist-overview img{max-height:260mm}.class{padding:18px 28px}}@media(max-width:600px){.cover{padding:30px 16px}.checklist-overview{padding:14px 10px}.class{padding:18px 14px}}`;
+  const write = (value) => writable.write(value);
+  await write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Caderno de ${esc(scout.name)}</title><style>${styles}</style></head><body><div class="wrap"><header class="cover"><div>CLUBE DE DESBRAVADORES</div><h1>CADERNO DE CLASSES</h1><p>Caderno digital individual</p><div class="identity"><div><b>Nome:</b><br>${esc(scout.name)}</div><div><b>Nascimento:</b><br>${esc(scout.birth || '—')}</div><div><b>Clube:</b><br>${esc(scout.club || '—')}</div><div><b>Unidade:</b><br>${esc(scout.unit || '—')}</div></div></header><section class="checklist-overview"><h2>Checklist das classes</h2><img src="${checklistImage}" alt="Imagem estática do progresso dos requisitos nas seis classes"></section>`);
+
+  let completedJobs = 0;
+  for (const classData of classes) {
+    await write(`<div class="class"><div class="class-title"><span>Classe de</span><strong>${esc(classData.name)}</strong><small>${esc(classData.advancedName || '')}</small></div>`);
+    let classHasRequirements = false;
+    for (const [sectionName, items] of classData.requirements) {
+      const approvedItems = items
+        .map((item) => ({ item, submission: submissions[`${classData.slug}:${item.id}`] }))
+        .filter(({ submission }) => submission && ['adminApproved', 'regionalApproved'].includes(submission.status));
+      if (!approvedItems.length) continue;
+      classHasRequirements = true;
+      await write(`<section><h2>${esc(sectionName)}</h2>`);
+      for (const { item, submission } of approvedItems) {
+        await write(`<article class="req"><div class="num">${esc(item.number)}</div><div><div class="rid">${esc(item.sectionCode)} · requisito ${esc(item.number)}</div><h3>${esc(item.text)}</h3>${item.sub?.length ? `<ul>${item.sub.map((text) => `<li>${esc(text)}</li>`).join('')}</ul>` : ''}<div class="meta">📅 ${esc(submission.date || '—')} · ✓ ${submission.status === 'regionalApproved' ? 'Confirmado pelo regional' : 'Aprovado pela liderança'}</div>${submission.text ? `<div class="answer"><b>Resposta / relatório</b><p>${esc(submission.text).replace(/\n/g, '<br>')}</p></div>` : ''}<div class="media">`);
+        for (const file of submission.files || []) {
+          const full = await getEvidenceFileStream(file.id);
+          const mime = esc(file.type || 'application/octet-stream');
+          if (file.type?.startsWith('image/')) {
+            await write(`<img class="photo" loading="lazy" src="data:${mime};base64,`);
+            await writeBase64Stream(writable, full.stream);
+            await write(`" alt="${esc(file.name)}">`);
+          } else if (file.type?.startsWith('video/')) {
+            await write(`<video class="video" controls preload="none" src="data:${mime};base64,`);
+            await writeBase64Stream(writable, full.stream);
+            await write(`"></video>`);
+          } else {
+            const label = file.type === 'application/pdf' ? '📄 Abrir PDF: ' : '📎 ';
+            await write(`<a class="pdf" href="data:${mime};base64,`);
+            await writeBase64Stream(writable, full.stream);
+            await write(`" download="${esc(file.name)}">${label}${esc(file.name)}</a>`);
+          }
+        }
+        if (submission.youtube) {
+          const match = String(submission.youtube).match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([A-Za-z0-9_-]{6,})/i);
+          if (match) await write(`<div class="youtube"><iframe loading="lazy" src="https://www.youtube.com/embed/${match[1]}" allowfullscreen></iframe></div>`);
+        }
+        await write('</div></div></article>');
+        completedJobs += 1;
+        onProgress({ completed: completedJobs, total: totalJobs, fileCount, totalBytes });
+      }
+      await write('</section>');
+    }
+    if (!classHasRequirements) await write('<p class="empty">Nenhum requisito confirmado para esta classe.</p>');
+    await write('</div>');
+  }
+  await write('</div></body></html>');
+  await writable.close();
+  return { size: Math.round(totalBytes * 4 / 3), destination: 'selected' };
+}
+
 export async function generateDigitalNotebook({ scout, classes, submissions, onProgress = () => {} }) {
+  const approvedFiles = Object.values(submissions)
+    .filter((submission) => ['adminApproved', 'regionalApproved'].includes(submission?.status))
+    .flatMap((submission) => submission.files || []);
+  const totalBytes = approvedFiles.reduce((sum, file) => sum + (Number(file.size) || 0), 0);
+  const totalJobs = classes.reduce((sum, classData) => sum + classData.requirements.reduce((sectionSum, [, items]) => sectionSum + items.filter((item) => ['adminApproved', 'regionalApproved'].includes(submissions[`${classData.slug}:${item.id}`]?.status)).length, 0), 0);
+
+  if (totalBytes > 50 * 1024 * 1024) {
+    if (!window.showSaveFilePicker) {
+      throw new Error('Este caderno tem muitos anexos e o navegador não oferece salvamento em fluxo. Abra o link no Google Chrome ou Microsoft Edge para baixar o HTML grande.');
+    }
+    const suggestedName = `caderno-${slug(scout.name)}.html`;
+    const handle = await window.showSaveFilePicker({
+      suggestedName,
+      types: [{ description: 'Caderno digital HTML', accept: { 'text/html': ['.html'] } }]
+    });
+    const writable = await handle.createWritable();
+    try {
+      const checklistImage = await blobData(
+        new Blob([createChecklistSvg(classes, submissions)], { type: 'image/svg+xml;charset=utf-8' })
+      );
+      onProgress({ completed: 0, total: totalJobs, fileCount: approvedFiles.length, totalBytes });
+      const result = await writeLargeNotebook({ scout, classes, submissions, checklistImage, writable, onProgress, fileCount: approvedFiles.length, totalBytes, totalJobs });
+      return { filename: suggestedName, ...result };
+    } catch (error) {
+      await writable.abort().catch(() => {});
+      throw error;
+    }
+  }
+
   const checklistImage = await blobData(
     new Blob([createChecklistSvg(classes, submissions)], { type: 'image/svg+xml;charset=utf-8' })
   );
@@ -168,10 +278,6 @@ export async function generateDigitalNotebook({ scout, classes, submissions, onP
     }))
   );
 
-  const approvedFiles = Object.values(submissions)
-    .filter((submission) => ['adminApproved', 'regionalApproved'].includes(submission?.status))
-    .flatMap((submission) => submission.files || []);
-  const totalBytes = approvedFiles.reduce((sum, file) => sum + (Number(file.size) || 0), 0);
   onProgress({ completed: 0, total: jobs.length, fileCount: approvedFiles.length, totalBytes });
 
   let nextJob = 0;

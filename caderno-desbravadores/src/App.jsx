@@ -2164,9 +2164,17 @@ function ScoutPanel({
           );
         }
       });
-      setNotebookStatus(`Arquivo ${result.filename} gerado. Confira a pasta Downloads.`);
+      setNotebookStatus(
+        result.destination === 'selected'
+          ? `Arquivo ${result.filename} salvo no local escolhido.`
+          : `Arquivo ${result.filename} gerado. Confira a pasta Downloads.`
+      );
     } catch (error) {
-      setNotebookStatus(error.message || 'Não foi possível gerar o caderno. Tente novamente.');
+      setNotebookStatus(
+        error.name === 'AbortError'
+          ? 'Salvamento cancelado.'
+          : error.message || 'Não foi possível gerar o caderno. Tente novamente.'
+      );
     } finally {
       setIsGeneratingNotebook(false);
     }

@@ -340,6 +340,17 @@ export async function getEvidenceFile(id) {
   return { blob: file.blob };
 }
 
+export async function getEvidenceFileStream(id) {
+  if (await usesSharedServer()) {
+    const response = await fetch(`/api/evidence/${encodeURIComponent(String(id || ''))}`, { credentials: 'same-origin' });
+    if (!response.ok) throw new Error('O arquivo não foi encontrado no computador que hospeda o caderno.');
+    if (!response.body) throw new Error('O navegador não conseguiu ler este anexo em partes.');
+    return { stream: response.body };
+  }
+  const { blob } = await getEvidenceFile(id);
+  return { stream: blob.stream() };
+}
+
 export async function getEvidencePreviewUrl(id) {
   if (await usesSharedServer()) return `/api/evidence/${encodeURIComponent(String(id || ''))}`;
   const { blob } = await getEvidenceFile(id);
