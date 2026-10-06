@@ -116,6 +116,7 @@ function MigrationTools({ user }) {
       )}
       {shared === false && <button type="button" onClick={exportCopy} disabled={busy}>Baixar cópia desta base</button>}
       {notice && <small>{notice}</small>}
+      {shared !== null && <small>{shared ? 'Dados compartilhados pelo computador servidor.' : 'Dados salvos neste navegador.'}</small>}
     </div>
   );
 }
@@ -2850,7 +2851,6 @@ export default function App() {
 
         <footer>
           <MigrationTools user={user} />
-          {shared ? 'Dados compartilhados pelo computador servidor.' : 'Dados salvos neste navegador.'}
         </footer>
       </main>
     </>
