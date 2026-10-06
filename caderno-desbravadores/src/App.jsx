@@ -17,7 +17,9 @@ import {
   authenticateUser,
   getSessionExpiresAt,
   restoreAuthenticatedUser,
-  signOutUser
+  signOutUser,
+  exportLocalBackup,
+  importSharedBackup
 } from './lib/storage';
 
 import { generateDigitalNotebook } from './lib/notebook';
@@ -59,6 +61,64 @@ const isEvaluator = (role) =>
   role === 'ADMIN' ||
   role === 'DIRECTOR' ||
   role === 'REGIONAL';
+
+function MigrationTools({ user }) {
+  const [ready, setReady] = useState(false);
+  const [shared, setShared] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
+  useEffect(() => {
+    if (user.role !== 'DIRECTOR') return;
+    fetch('/api/status', { credentials: 'same-origin' })
+      .then((response) => response.ok ? response.json() : null)
+      .then(async (status) => {
+        const isShared = Boolean(status?.sharedDatabase); setShared(isShared);
+        if (!isShared) return;
+        const response = await fetch('/api/migration/status', { credentials: 'same-origin' });
+        const result = response.ok ? await response.json() : null;
+        setReady(Boolean(result?.ready));
+      }).catch(() => setShared(false));
+  }, [user.role]);
+
+  const exportCopy = async () => {
+    setBusy(true); setNotice('Preparando uma cópia dos dados e arquivos…');
+    try {
+      const backup = await exportLocalBackup();
+      const blob = new Blob([JSON.stringify(backup)], { type: 'application/json' });
+      const link = document.createElement('a'); link.href = URL.createObjectURL(blob);
+      link.download = `caderno-backup-${new Date().toISOString().slice(0, 10)}.json`; link.click();
+      setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+      setNotice('Cópia baixada. Ela continuará guardada no dispositivo antigo.');
+    } catch (error) { setNotice(error.message || 'Não foi possível criar a cópia.'); }
+    finally { setBusy(false); }
+  };
+
+  const importCopy = async (event) => {
+    const file = event.target.files?.[0]; if (!file) return;
+    if (!window.confirm('Importar os dados e arquivos para o servidor deste computador? A base antiga continuará intacta, mas a base compartilhada substituirá os dados iniciais deste servidor.')) { event.target.value = ''; return; }
+    setBusy(true); setNotice('Importando a cópia para o computador servidor…');
+    try {
+      const result = await importSharedBackup(file);
+      setNotice(`Importação concluída: ${result.users} usuários e ${result.files} arquivos. Reabrindo o caderno…`);
+      window.setTimeout(() => window.location.reload(), 1200);
+    } catch (error) { setNotice(error.message || 'Não foi possível importar a cópia.'); }
+    finally { setBusy(false); event.target.value = ''; }
+  };
+
+  if (user.role !== 'DIRECTOR') return null;
+  return (
+    <div className="migration-tools">
+      {ready && (
+        <>
+          <label className="outline migration-import">Importar cópia antiga<input type="file" accept="application/json,.json" onChange={importCopy} disabled={busy} /></label>
+          <small>Use o arquivo baixado no site antigo. A cópia antiga permanece intacta.</small>
+        </>
+      )}
+      {shared === false && <button type="button" onClick={exportCopy} disabled={busy}>Baixar cópia desta base</button>}
+      {notice && <small>{notice}</small>}
+    </div>
+  );
+}
 
 function Login({ onLogin }) {
   const [username, setUsername] = useState('');
@@ -453,7 +513,7 @@ function EvidencePreview({
         const signedUrl = await getEvidencePreviewUrl(path);
 
         if (!alive) {
-          URL.revokeObjectURL(signedUrl);
+          if (signedUrl.startsWith('blob:')) URL.revokeObjectURL(signedUrl);
           return;
         }
 
@@ -479,7 +539,7 @@ function EvidencePreview({
 
     return () => {
       alive = false;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
+      if (objectUrl?.startsWith('blob:')) URL.revokeObjectURL(objectUrl);
     };
   }, [file?.path, file?.id]);
 
@@ -2789,8 +2849,8 @@ export default function App() {
         )}
 
         <footer>
-          Protótipo local · dados
-          salvos neste navegador.
+          <MigrationTools user={user} />
+          {shared ? 'Dados compartilhados pelo computador servidor.' : 'Dados salvos neste navegador.'}
         </footer>
       </main>
     </>

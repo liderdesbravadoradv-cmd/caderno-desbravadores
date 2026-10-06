@@ -14,6 +14,29 @@ const emptyState = () => ({
 });
 
 let databasePromise;
+let serverModePromise;
+let serverExpiresAt = null;
+
+async function usesSharedServer() {
+  if (!serverModePromise) {
+    serverModePromise = fetch('/api/status', { credentials: 'same-origin' })
+      .then((response) => response.ok ? response.json() : null)
+      .then((result) => Boolean(result?.sharedDatabase))
+      .catch(() => false);
+  }
+  return serverModePromise;
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    credentials: 'same-origin',
+    ...options,
+    headers: { ...(options.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }), ...options.headers }
+  });
+  const result = response.status === 204 ? null : await response.json().catch(() => null);
+  if (!response.ok) throw new Error(result?.error || 'Não foi possível acessar os dados compartilhados.');
+  return result;
+}
 
 function openDatabase() {
   if (typeof indexedDB === 'undefined') {
@@ -137,6 +160,11 @@ function normalizeUsername(username) {
 }
 
 export async function authenticateUser(username, password) {
+  if (await usesSharedServer()) {
+    const result = await api('/api/login', { method: 'POST', body: JSON.stringify({ username, password }) });
+    serverExpiresAt = result.expiresAt;
+    return result.db;
+  }
   const state = await ensureState();
   const normalized = normalizeUsername(username);
   const user = state.users.find((item) => normalizeUsername(item.username) === normalized);
@@ -151,6 +179,13 @@ export async function authenticateUser(username, password) {
 }
 
 export async function restoreAuthenticatedUser() {
+  if (await usesSharedServer()) {
+    try {
+      const result = await api('/api/session');
+      serverExpiresAt = result?.expiresAt || null;
+      return result?.user ? { db: result.db, user: result.user, expiresAt: result.expiresAt } : null;
+    } catch { return null; }
+  }
   const session = sessionData();
   if (!session || !Number.isFinite(session.expiresAt) || session.expiresAt <= Date.now()) {
     localStorage.removeItem(SESSION_KEY);
@@ -168,18 +203,28 @@ export async function restoreAuthenticatedUser() {
 }
 
 export function getSessionExpiresAt() {
+  if (serverExpiresAt) return Number(serverExpiresAt);
   return Number(sessionData()?.expiresAt);
 }
 
 export async function signOutUser() {
+  if (await usesSharedServer()) {
+    await api('/api/logout', { method: 'POST', body: '{}' }).catch(() => {});
+    serverExpiresAt = null;
+  }
   localStorage.removeItem(SESSION_KEY);
 }
 
 export async function loadDB() {
+  if (await usesSharedServer()) return (await api('/api/state')).db;
   return publicState(await ensureState());
 }
 
 export async function saveDB(db) {
+  if (await usesSharedServer()) {
+    await api('/api/state', { method: 'PUT', body: JSON.stringify(db) });
+    return;
+  }
   const current = await ensureState();
   const passwordById = new Map(current.users.map((user) => [user.id, user.passwordHash]));
   const nextUsers = (db.users || []).map((user) => ({
@@ -199,6 +244,10 @@ async function currentUser() {
 }
 
 export async function manageUser(action, payload = {}) {
+  if (await usesSharedServer()) {
+    await api('/api/users', { method: 'POST', body: JSON.stringify({ action, payload }) });
+    return { ok: true };
+  }
   const { state, user: actor } = await currentUser();
   if (actor.role !== 'DIRECTOR') throw new Error('Somente o Diretor pode gerenciar acessos.');
 
@@ -279,6 +328,11 @@ async function listEvidenceFiles() {
 }
 
 export async function getEvidenceFile(id) {
+  if (await usesSharedServer()) {
+    const response = await fetch(`/api/evidence/${encodeURIComponent(String(id || ''))}`, { credentials: 'same-origin' });
+    if (!response.ok) throw new Error('O arquivo não foi encontrado no computador que hospeda o caderno.');
+    return { blob: await response.blob() };
+  }
   const database = await openDatabase();
   const transaction = database.transaction(EVIDENCE_STORE, 'readonly');
   const file = await requestResult(transaction.objectStore(EVIDENCE_STORE).get(String(id || '')));
@@ -287,6 +341,7 @@ export async function getEvidenceFile(id) {
 }
 
 export async function getEvidencePreviewUrl(id) {
+  if (await usesSharedServer()) return `/api/evidence/${encodeURIComponent(String(id || ''))}`;
   const { blob } = await getEvidenceFile(id);
   return URL.createObjectURL(blob);
 }
@@ -295,6 +350,21 @@ export async function saveEvidenceFiles(files, key) {
   if (!files?.length) return [];
   const [ownerId, classSlug, itemId] = String(key).split(':');
   if (!ownerId || !classSlug || !itemId) throw new Error('Identificador do requisito inválido.');
+  if (await usesSharedServer()) {
+    const saved = [];
+    for (const file of files) {
+      const id = `${ownerId}/${classSlug}/${itemId}/${crypto.randomUUID()}-${safeName(file.name)}`;
+      const response = await fetch(`/api/evidence/${encodeURIComponent(id)}`, {
+        method: 'PUT', credentials: 'same-origin',
+        headers: { 'Content-Type': file.type || 'application/octet-stream', 'X-File-Name': encodeURIComponent(file.name) },
+        body: file
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.error || 'Não foi possível enviar o arquivo para o computador servidor.');
+      saved.push(result.file);
+    }
+    return saved;
+  }
   const database = await openDatabase();
   const saved = [];
 
@@ -320,6 +390,10 @@ export async function saveEvidenceFiles(files, key) {
 export async function deleteEvidenceFile(id) {
   const path = String(id || '').trim();
   if (!path) return;
+  if (await usesSharedServer()) {
+    await api(`/api/evidence/${encodeURIComponent(path)}`, { method: 'DELETE' });
+    return;
+  }
   const database = await openDatabase();
   const transaction = database.transaction(EVIDENCE_STORE, 'readwrite');
   transaction.objectStore(EVIDENCE_STORE).delete(path);
@@ -328,4 +402,32 @@ export async function deleteEvidenceFile(id) {
     transaction.onerror = () => reject(transaction.error);
     transaction.onabort = () => reject(transaction.error || new Error('Não foi possível excluir o arquivo local.'));
   });
+}
+
+export async function exportLocalBackup() {
+  if (await usesSharedServer()) throw new Error('Esta função deve ser usada no site antigo, antes da importação.');
+  const state = await ensureState();
+  const files = await listEvidenceFiles();
+  const serializedFiles = await Promise.all(files.map(async (file) => ({
+    id: file.id,
+    ownerId: file.ownerId,
+    name: file.blob?.name || String(file.id).split('/').at(-1),
+    type: file.blob?.type || 'application/octet-stream',
+    createdAt: file.createdAt || new Date().toISOString(),
+    data: await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
+      reader.onerror = () => reject(reader.error || new Error('Não foi possível ler um arquivo.'));
+      reader.readAsDataURL(file.blob);
+    })
+  })));
+  return { format: 'caderno-desbravadores-backup-v1', exportedAt: new Date().toISOString(), state, files: serializedFiles };
+}
+
+export async function importSharedBackup(file) {
+  if (!(await usesSharedServer())) throw new Error('Abra o endereço local do servidor para importar a cópia.');
+  const response = await fetch('/api/migration/import', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: await file.text() });
+  const result = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(result?.error || 'Não foi possível importar a cópia.');
+  return result;
 }

@@ -7,6 +7,10 @@ dist/
 # Arquivos enviados pelos usuários
 uploads/
 storage/
+local-data/
+allowed-emails.txt
+tools/cloudflared.exe
+caderno-backup-*.json
 
 # Bancos locais
 *.db
