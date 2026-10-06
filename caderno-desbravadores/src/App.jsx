@@ -18,6 +18,8 @@ import {
   getSessionExpiresAt,
   restoreAuthenticatedUser,
   signOutUser,
+  hasSharedServer,
+  downloadNotebookFromSharedServer,
   exportLocalBackup,
   importSharedBackup
 } from './lib/storage';
@@ -2153,6 +2155,11 @@ function ScoutPanel({
     setIsGeneratingNotebook(true);
     setNotebookStatus('Preparando os anexos e montando o arquivo HTML…');
     try {
+      if (hasSharedServer()) {
+        await downloadNotebookFromSharedServer();
+        setNotebookStatus('O servidor está preparando o caderno. Acompanhe o download no navegador.');
+        return;
+      }
       const result = await generateDigitalNotebook({
         scout: user,
         classes,

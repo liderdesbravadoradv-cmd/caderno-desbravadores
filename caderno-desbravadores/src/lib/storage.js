@@ -15,16 +15,35 @@ const emptyState = () => ({
 
 let databasePromise;
 let serverModePromise;
+let sharedServerDetected = false;
 let serverExpiresAt = null;
 
 async function usesSharedServer() {
   if (!serverModePromise) {
     serverModePromise = fetch('/api/status', { credentials: 'same-origin' })
       .then((response) => response.ok ? response.json() : null)
-      .then((result) => Boolean(result?.sharedDatabase))
+      .then((result) => {
+        sharedServerDetected = Boolean(result?.sharedDatabase);
+        return sharedServerDetected;
+      })
       .catch(() => false);
   }
   return serverModePromise;
+}
+
+export function hasSharedServer() {
+  return sharedServerDetected;
+}
+
+export function downloadNotebookFromSharedServer() {
+  if (!sharedServerDetected) return false;
+  const link = document.createElement('a');
+  link.href = '/api/notebook';
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  return true;
 }
 
 async function api(path, options = {}) {

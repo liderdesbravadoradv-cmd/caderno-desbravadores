@@ -6,6 +6,7 @@ import { extname, join, normalize, resolve, sep } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
+import { classes, getClassChecklistLabel } from './src/data/classes.js';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const dataDir = resolve(process.env.CADERNO_DATA_DIR || join(root, 'local-data'));
@@ -61,6 +62,136 @@ function send(res, status, value, headers = {}) {
   res.end(value === null ? '' : JSON.stringify(value));
 }
 function fail(res, status, error) { send(res, status, { error }); }
+function escHtml(value = '') {
+  return String(value).replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+}
+async function writeDownloadChunk(res, chunk) {
+  if (res.destroyed) throw new Error('A conexão do download foi encerrada.');
+  if (!res.write(chunk)) {
+    await new Promise((resolveDrain, rejectDrain) => {
+      const cleanup = () => { res.off('drain', onDrain); res.off('close', onClose); };
+      const onDrain = () => { cleanup(); resolveDrain(); };
+      const onClose = () => { cleanup(); rejectDrain(new Error('A conexão do download foi encerrada.')); };
+      res.once('drain', onDrain);
+      res.once('close', onClose);
+    });
+  }
+}
+async function writeFileAsBase64(res, filePath) {
+  let remainder = Buffer.alloc(0);
+  for await (const chunk of createReadStream(filePath)) {
+    const bytes = remainder.length ? Buffer.concat([remainder, chunk]) : chunk;
+    const completeLength = bytes.length - (bytes.length % 3);
+    if (completeLength) await writeDownloadChunk(res, bytes.subarray(0, completeLength).toString('base64'));
+    remainder = bytes.subarray(completeLength);
+  }
+  if (remainder.length) await writeDownloadChunk(res, remainder.toString('base64'));
+}
+function checklistSvg(submissions) {
+  const cards = classes.map((classData) => {
+    const requirements = classData.requirements.flatMap(([section, items]) => items.map((item) => ({ ...item, section })));
+    const completed = requirements.filter((item) => ['adminApproved', 'regionalApproved'].includes(submissions[`${classData.slug}:${item.id}`]?.status)).length;
+    return { classData, requirements, completed, percent: requirements.length ? Math.round(completed / requirements.length * 100) : 0, rows: Math.ceil(requirements.length / 10) };
+  });
+  let nextY = 86;
+  const rowYs = [];
+  for (let index = 0; index < cards.length; index += 2) {
+    rowYs.push(nextY);
+    nextY += Math.max(cards[index].rows, cards[index + 1]?.rows || 0) * 22 + 107;
+  }
+  const cardMarkup = cards.map((card, index) => {
+    const x = 20 + (index % 2) * 490;
+    const y = rowYs[Math.floor(index / 2)];
+    const checks = card.requirements.map((item, itemIndex) => {
+      const done = ['adminApproved', 'regionalApproved'].includes(submissions[`${card.classData.slug}:${item.id}`]?.status);
+      const cx = x + 20 + (itemIndex % 10) * 43;
+      const cy = y + 86 + Math.floor(itemIndex / 10) * 22;
+      const mark = done ? `<rect x="${cx}" y="${cy}" width="14" height="14" rx="3" fill="${escHtml(card.classData.color)}"/><path d="M${cx + 3} ${cy + 7}l3 3 5-6" fill="none" stroke="#fff" stroke-width="1.8"/>` : `<rect x="${cx}" y="${cy}" width="14" height="14" rx="3" fill="#fff" stroke="#aab6c2"/>`;
+      return `${mark}<text x="${cx + 18}" y="${cy + 11}" class="item-label">${escHtml(item.sectionCode)}-${escHtml(item.number)}</text>`;
+    }).join('');
+    const height = Math.max(95 + card.rows * 22, 95 + (cards[index + (index % 2 === 0 ? 1 : -1)]?.rows || 0) * 22);
+    return `<g><rect x="${x}" y="${y}" width="470" height="${height}" rx="16" fill="#fff" stroke="${escHtml(card.classData.color)}" stroke-width="3"/><rect x="${x}" y="${y}" width="470" height="46" rx="14" fill="${escHtml(card.classData.color)}"/><text x="${x + 18}" y="${y + 30}" class="class-name">${escHtml(getClassChecklistLabel(card.classData))}</text><text x="${x + 452}" y="${y + 29}" class="count" text-anchor="end">${card.completed}/${card.requirements.length}</text><text x="${x + 20}" y="${y + 64}" class="percent">${card.percent}% aprovado pela diretoria</text><rect x="${x + 20}" y="${y + 70}" width="430" height="6" rx="3" fill="#e7edf3"/><rect x="${x + 20}" y="${y + 70}" width="${430 * card.percent / 100}" height="6" rx="3" fill="${escHtml(card.classData.color)}"/>${checks}</g>`;
+  }).join('');
+  const height = rowYs[2] + Math.max(95 + cards[4].rows * 22, 95 + cards[5].rows * 22) + 46;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="${height}" viewBox="0 0 1000 ${height}"><style>text{font-family:Arial,Helvetica,sans-serif;fill:#243342}.class-name{font-size:20px;font-weight:700;fill:#fff}.count{font-size:18px;font-weight:700;fill:#fff}.percent{font-size:13px;fill:#53677a}.item-label{font-size:10px;fill:#405367}</style><rect width="100%" height="100%" fill="#f4f6f8"/><text x="20" y="36" style="font-size:24px;font-weight:700;fill:#173f73">Progresso das classes</text><text x="20" y="57" style="font-size:13px;fill:#617386">Itens marcados foram aprovados pela diretoria.</text>${cardMarkup}</svg>`;
+}
+async function streamNotebook(req, res, user) {
+  if (user.role !== 'DESBRAVADOR') return fail(res, 403, 'Somente o acesso do desbravador pode gerar este caderno.');
+  const current = state();
+  const scout = current.users.find((candidate) => candidate.id === user.id);
+  if (!scout) return fail(res, 404, 'O acesso do desbravador não foi encontrado.');
+  const submissions = {};
+  for (const classData of classes) {
+    for (const [, items] of classData.requirements) {
+      for (const item of items) {
+        const submission = current.submissions?.[`${user.id}:${classData.slug}:${item.id}`];
+        if (submission && ['adminApproved', 'regionalApproved'].includes(submission.status)) submissions[`${classData.slug}:${item.id}`] = submission;
+      }
+    }
+  }
+  const filePaths = new Map();
+  for (const submission of Object.values(submissions)) {
+    for (const file of submission.files || []) {
+      const evidence = getEvidence.get(file.id);
+      if (!evidence || evidence.owner_id !== user.id) return fail(res, 404, 'Um anexo aprovado não foi encontrado no computador.');
+      const filePath = join(filesDir, evidence.disk_name);
+      try { statSync(filePath); } catch { return fail(res, 404, 'Um anexo aprovado não foi encontrado no computador.'); }
+      filePaths.set(file.id, { filePath, type: evidence.type, name: evidence.name });
+    }
+  }
+
+  const slug = String(scout.name || 'desbravador').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'desbravador';
+  const filename = `caderno-${slug}.html`;
+  const disposition = `attachment; filename="${filename}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Disposition': disposition, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
+  const write = (value) => writeDownloadChunk(res, value);
+  const svgData = Buffer.from(checklistSvg(submissions)).toString('base64');
+  const styles = 'body{font-family:Arial,sans-serif;background:#f4f6f8;color:#243342;margin:0}.wrap{max-width:1000px;margin:auto;background:#fff;min-height:100vh}.cover{padding:42px 44px;text-align:center;background:linear-gradient(135deg,#eef5fb,#fff);border-bottom:1px solid #dbe4ec}.cover h1{font-size:38px;margin:5px 0 18px}.cover p{color:#667;margin:4px 0}.identity{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;text-align:left;max-width:650px;margin:20px auto 0}.identity div{padding:8px;border:1px solid #e1e8ef;border-radius:10px}.checklist-overview{padding:18px 24px;page-break-before:always;page-break-after:always}.checklist-overview h2{margin:0 0 9px;color:#173f73;font-size:25px}.checklist-overview img{display:block;width:100%;height:auto;max-height:980px;object-fit:contain}.class{padding:24px 40px;page-break-before:always}.class-title{padding:14px;border-radius:16px;background:#eaf2f8}.class-title span,.class-title small{display:block;color:#607487}.class-title strong{font-size:28px;display:block;margin:2px 0 3px}.class section{margin-top:17px}.class section>h2{font-size:20px;border-bottom:2px solid #dce5ed;padding-bottom:5px;margin:0 0 6px}.req{display:grid;grid-template-columns:42px 1fr;gap:11px;padding:13px 0;border-bottom:1px solid #e5ebf0}.num{font-weight:700;font-size:18px;background:#eef3f7;border-radius:10px;width:42px;height:42px;display:grid;place-items:center}.rid{font-size:12px;color:#758797;text-transform:uppercase}.req h3{margin:3px 0 7px}.meta{font-size:13px;color:#5f7384;margin:6px 0}.answer{background:#fafbfd;border:1px solid #e1e8ef;border-radius:10px;padding:9px}.answer p{margin:5px 0}.photo{display:block;max-width:100%;max-height:650px;margin:6px 0;border-radius:10px}.video{display:block;width:100%;max-height:650px;margin:6px 0;border-radius:10px;background:#000}.youtube iframe{width:100%;height:420px;border:0;border-radius:10px}.pdf{display:block;padding:9px;background:#f2f6f9;border-radius:8px;margin:5px 0;color:#245b82;text-decoration:none}.empty{text-align:center;color:#778896;padding:18px}@media print{body{background:#fff}.wrap{max-width:none}.checklist-overview{padding:8mm 6mm}.checklist-overview img{max-height:260mm}.class{padding:18px 28px}}@media(max-width:600px){.cover{padding:30px 16px}.checklist-overview{padding:14px 10px}.class{padding:18px 14px}}';
+  await write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Caderno de ${escHtml(scout.name)}</title><style>${styles}</style></head><body><div class="wrap"><header class="cover"><div>CLUBE DE DESBRAVADORES</div><h1>CADERNO DE CLASSES</h1><p>Caderno digital individual</p><div class="identity"><div><b>Nome:</b><br>${escHtml(scout.name)}</div><div><b>Nascimento:</b><br>${escHtml(scout.birth || '—')}</div><div><b>Clube:</b><br>${escHtml(scout.club || '—')}</div><div><b>Unidade:</b><br>${escHtml(scout.unit || '—')}</div></div></header><section class="checklist-overview"><h2>Checklist das classes</h2><img src="data:image/svg+xml;base64,${svgData}" alt="Imagem estática do progresso dos requisitos nas seis classes"></section>`);
+
+  for (const classData of classes) {
+    await write(`<div class="class"><div class="class-title"><span>Classe de</span><strong>${escHtml(classData.name)}</strong><small>${escHtml(classData.advancedName || '')}</small></div>`);
+    let hasItems = false;
+    for (const [sectionName, items] of classData.requirements) {
+      const approvedItems = items.map((item) => ({ item, submission: submissions[`${classData.slug}:${item.id}`] })).filter(({ submission }) => submission);
+      if (!approvedItems.length) continue;
+      hasItems = true;
+      await write(`<section><h2>${escHtml(sectionName)}</h2>`);
+      for (const { item, submission } of approvedItems) {
+        await write(`<article class="req"><div class="num">${escHtml(item.number)}</div><div><div class="rid">${escHtml(item.sectionCode)} · requisito ${escHtml(item.number)}</div><h3>${escHtml(item.text)}</h3>${item.sub?.length ? `<ul>${item.sub.map((text) => `<li>${escHtml(text)}</li>`).join('')}</ul>` : ''}<div class="meta">📅 ${escHtml(submission.date || '—')} · ✓ ${submission.status === 'regionalApproved' ? 'Confirmado pelo regional' : 'Aprovado pela liderança'}</div>${submission.text ? `<div class="answer"><b>Resposta / relatório</b><p>${escHtml(submission.text).replace(/\n/g, '<br>')}</p></div>` : ''}<div class="media">`);
+        for (const file of submission.files || []) {
+          const evidence = filePaths.get(file.id);
+          const mime = escHtml(evidence.type || file.type || 'application/octet-stream');
+          const name = escHtml(evidence.name || file.name);
+          if (mime.startsWith('image/')) {
+            await write(`<img class="photo" loading="lazy" src="data:${mime};base64,`);
+            await writeFileAsBase64(res, evidence.filePath);
+            await write(`" alt="${name}">`);
+          } else if (mime.startsWith('video/')) {
+            await write(`<video class="video" controls preload="none" src="data:${mime};base64,`);
+            await writeFileAsBase64(res, evidence.filePath);
+            await write(`"></video>`);
+          } else {
+            const label = mime === 'application/pdf' ? '📄 Abrir PDF: ' : '📎 ';
+            await write(`<a class="pdf" href="data:${mime};base64,`);
+            await writeFileAsBase64(res, evidence.filePath);
+            await write(`" download="${name}">${label}${name}</a>`);
+          }
+        }
+        if (submission.youtube) {
+          const match = String(submission.youtube).match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([A-Za-z0-9_-]{6,})/i);
+          if (match) await write(`<div class="youtube"><iframe loading="lazy" src="https://www.youtube.com/embed/${match[1]}" allowfullscreen></iframe></div>`);
+        }
+        await write('</div></div></article>');
+      }
+      await write('</section>');
+    }
+    if (!hasItems) await write('<p class="empty">Nenhum requisito confirmado para esta classe.</p>');
+    await write('</div>');
+  }
+  await write('</div></body></html>');
+  res.end();
+}
 async function jsonBody(req, limit = 8 * 1024 * 1024) {
   const chunks = []; let size = 0;
   for await (const chunk of req) { size += chunk.length; if (size > limit) throw Object.assign(new Error('O arquivo enviado excede o limite permitido.'), { status: 413 }); chunks.push(chunk); }
@@ -202,6 +333,10 @@ const server = createServer(async (req, res) => {
     if (path === '/api/state' && req.method === 'GET') {
       if (!requireUser(req, res)) return;
       return send(res, 200, { db: publicState(state()) });
+    }
+    if (path === '/api/notebook' && req.method === 'GET') {
+      const session = requireUser(req, res); if (!session) return;
+      return await streamNotebook(req, res, session.user);
     }
     if (path === '/api/state' && req.method === 'PUT') {
       const session = requireUser(req, res); if (!session) return;
