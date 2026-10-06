@@ -644,6 +644,7 @@ function EvidencePreview({
         <img
           src={url}
           alt={file.name}
+          loading="lazy"
           onError={() =>
             setLoadError('Não foi possível carregar esta imagem.')
           }
@@ -664,7 +665,7 @@ function EvidencePreview({
       >
         <video
           controls
-          preload="metadata"
+          preload="none"
           src={url}
         />
 
@@ -684,6 +685,7 @@ function EvidencePreview({
         <iframe
           title={file.name}
           src={url}
+          loading="lazy"
         />
 
         <small>{file.name}</small>
@@ -2140,9 +2142,35 @@ function ScoutPanel({
 }) {
   const [selected, setSelected] =
     useState('amigo');
+  const [isGeneratingNotebook, setIsGeneratingNotebook] = useState(false);
+  const [notebookStatus, setNotebookStatus] = useState('');
 
   const progress =
     useProgress(user.id, db);
+
+  const generateNotebook = async () => {
+    if (isGeneratingNotebook) return;
+    setIsGeneratingNotebook(true);
+    setNotebookStatus('Preparando os anexos e montando o arquivo HTML…');
+    try {
+      const result = await generateDigitalNotebook({
+        scout: user,
+        classes,
+        submissions: mapScoutSubmissions(user.id, db),
+        onProgress: ({ completed, total, fileCount, totalBytes }) => {
+          const size = formatBytes(totalBytes);
+          setNotebookStatus(
+            `Preparando ${completed}/${total} requisitos aprovados · ${fileCount} anexos${size ? ` (${size})` : ''}. Arquivos grandes, especialmente vídeos, podem levar alguns minutos.`
+          );
+        }
+      });
+      setNotebookStatus(`Arquivo ${result.filename} gerado. Confira a pasta Downloads.`);
+    } catch (error) {
+      setNotebookStatus(error.message || 'Não foi possível gerar o caderno. Tente novamente.');
+    } finally {
+      setIsGeneratingNotebook(false);
+    }
+  };
 
   return (
     <>
@@ -2169,20 +2197,17 @@ function ScoutPanel({
         <button
           className="primary"
           type="button"
-          onClick={() =>
-            generateDigitalNotebook({
-              scout: user,
-              classes,
-              submissions:
-                mapScoutSubmissions(
-                  user.id,
-                  db
-                )
-            })
-          }
+          onClick={generateNotebook}
+          disabled={isGeneratingNotebook}
+          aria-busy={isGeneratingNotebook}
         >
-          📖 Gerar Caderno Digital
+          {isGeneratingNotebook ? 'Preparando caderno…' : '📖 Gerar Caderno Digital'}
         </button>
+        {notebookStatus && (
+          <small className="notebook-status" role="status" aria-live="polite">
+            {notebookStatus}
+          </small>
+        )}
       </div>
 
       <ClassPage

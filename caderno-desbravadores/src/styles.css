@@ -36,6 +36,8 @@
 .section-checklist{margin:7px 0 8px;gap:5px}
 .toolbar{margin-top:18px;padding:12px 14px;gap:10px}
 .toolbar span{margin-top:2px}
+.notebook-status{display:block;margin-top:6px;color:#536477;font-size:12px}
+.toolbar button:disabled{opacity:.7;cursor:wait}
 .class-page{margin-top:16px}
 .class-banner{gap:12px;padding:16px 20px;border-left-width:7px}
 .section-nav{gap:5px;margin:9px 0 16px}

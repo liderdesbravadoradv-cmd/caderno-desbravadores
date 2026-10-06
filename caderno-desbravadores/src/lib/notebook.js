@@ -115,64 +115,87 @@ function createChecklistSvg(classes, submissions) {
   </svg>`;
 }
 
-export async function generateDigitalNotebook({ scout, classes, submissions }) {
+export async function generateDigitalNotebook({ scout, classes, submissions, onProgress = () => {} }) {
   const checklistImage = await blobData(
     new Blob([createChecklistSvg(classes, submissions)], { type: 'image/svg+xml;charset=utf-8' })
   );
-  const sections = [];
+  const renderableClasses = classes.map((classData) => ({
+    classData,
+    sections: classData.requirements.map(([name, items]) => ({
+      name,
+      items: items
+        .map((item) => ({ item, submission: submissions[`${classData.slug}:${item.id}`] }))
+        .filter(({ submission }) => submission && ['adminApproved', 'regionalApproved'].includes(submission.status))
+        .map((entry) => ({ ...entry, html: '' }))
+    }))
+  }));
 
-  for (const classData of classes) {
-    const requirementSections = [];
-
-    for (const [section, items] of classData.requirements) {
-      const itemHtml = [];
-
-      for (const item of items) {
-        const submission = submissions[`${classData.slug}:${item.id}`];
-        if (!submission || !['adminApproved', 'regionalApproved'].includes(submission.status)) continue;
-
-        let media = '';
-        for (const file of submission.files || []) {
-          const full = await getEvidenceFile(file.id);
-          if (!full) continue;
-          const data = await blobData(full.blob);
-          if (file.type?.startsWith('image/')) {
-            media += `<img class="photo" src="${data}" alt="${esc(file.name)}">`;
-          } else if (file.type?.startsWith('video/')) {
-            media += `<video class="video" controls preload="metadata" src="${data}"></video>`;
-          } else if (file.type === 'application/pdf') {
-            media += `<a class="pdf" href="${data}" download="${esc(file.name)}">📄 Abrir PDF: ${esc(file.name)}</a>`;
-          } else {
-            media += `<a class="pdf" href="${data}" download="${esc(file.name)}">📎 ${esc(file.name)}</a>`;
-          }
+  const jobs = renderableClasses.flatMap(({ sections }) =>
+    sections.flatMap(({ items }) => items.map((entry) => async () => {
+      let media = '';
+      for (const file of entry.submission.files || []) {
+        const full = await getEvidenceFile(file.id);
+        if (!full) continue;
+        const data = await blobData(full.blob);
+        if (file.type?.startsWith('image/')) {
+          media += `<img class="photo" loading="lazy" src="${data}" alt="${esc(file.name)}">`;
+        } else if (file.type?.startsWith('video/')) {
+          media += `<video class="video" controls preload="none" src="${data}"></video>`;
+        } else if (file.type === 'application/pdf') {
+          media += `<a class="pdf" href="${data}" download="${esc(file.name)}">📄 Abrir PDF: ${esc(file.name)}</a>`;
+        } else {
+          media += `<a class="pdf" href="${data}" download="${esc(file.name)}">📎 ${esc(file.name)}</a>`;
         }
-
-        if (submission.youtube) {
-          const match = String(submission.youtube).match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([A-Za-z0-9_-]{6,})/i);
-          if (match) media += `<div class="youtube"><iframe src="https://www.youtube.com/embed/${match[1]}" allowfullscreen></iframe></div>`;
-        }
-
-        itemHtml.push(`<article class="req">
-          <div class="num">${esc(item.number)}</div>
-          <div>
-            <div class="rid">${esc(item.sectionCode)} · requisito ${esc(item.number)}</div>
-            <h3>${esc(item.text)}</h3>
-            ${item.sub?.length ? `<ul>${item.sub.map((text) => `<li>${esc(text)}</li>`).join('')}</ul>` : ''}
-            <div class="meta">📅 ${esc(submission.date || '—')} · ✓ ${submission.status === 'regionalApproved' ? 'Confirmado pelo regional' : 'Aprovado pela liderança'}</div>
-            ${submission.text ? `<div class="answer"><b>Resposta / relatório</b><p>${esc(submission.text).replace(/\n/g, '<br>')}</p></div>` : ''}
-            ${media ? `<div class="media">${media}</div>` : ''}
-          </div>
-        </article>`);
       }
 
-      if (itemHtml.length) requirementSections.push(`<section><h2>${esc(section)}</h2>${itemHtml.join('')}</section>`);
-    }
+      if (entry.submission.youtube) {
+        const match = String(entry.submission.youtube).match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([A-Za-z0-9_-]{6,})/i);
+        if (match) media += `<div class="youtube"><iframe loading="lazy" src="https://www.youtube.com/embed/${match[1]}" allowfullscreen></iframe></div>`;
+      }
 
-    sections.push(`<div class="class">
+      const { item, submission } = entry;
+      entry.html = `<article class="req">
+        <div class="num">${esc(item.number)}</div>
+        <div>
+          <div class="rid">${esc(item.sectionCode)} · requisito ${esc(item.number)}</div>
+          <h3>${esc(item.text)}</h3>
+          ${item.sub?.length ? `<ul>${item.sub.map((text) => `<li>${esc(text)}</li>`).join('')}</ul>` : ''}
+          <div class="meta">📅 ${esc(submission.date || '—')} · ✓ ${submission.status === 'regionalApproved' ? 'Confirmado pelo regional' : 'Aprovado pela liderança'}</div>
+          ${submission.text ? `<div class="answer"><b>Resposta / relatório</b><p>${esc(submission.text).replace(/\n/g, '<br>')}</p></div>` : ''}
+          ${media ? `<div class="media">${media}</div>` : ''}
+        </div>
+      </article>`;
+    }))
+  );
+
+  const approvedFiles = Object.values(submissions)
+    .filter((submission) => ['adminApproved', 'regionalApproved'].includes(submission?.status))
+    .flatMap((submission) => submission.files || []);
+  const totalBytes = approvedFiles.reduce((sum, file) => sum + (Number(file.size) || 0), 0);
+  onProgress({ completed: 0, total: jobs.length, fileCount: approvedFiles.length, totalBytes });
+
+  let nextJob = 0;
+  let completedJobs = 0;
+  const workerCount = Math.min(2, jobs.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextJob < jobs.length) {
+      const job = jobs[nextJob++];
+      await job();
+      completedJobs += 1;
+      onProgress({ completed: completedJobs, total: jobs.length, fileCount: approvedFiles.length, totalBytes });
+    }
+  }));
+
+  const sections = renderableClasses.map(({ classData, sections: requirementSections }) => {
+    const sectionHtml = requirementSections
+      .filter(({ items }) => items.length)
+      .map(({ name, items }) => `<section><h2>${esc(name)}</h2>${items.map(({ html }) => html).join('')}</section>`)
+      .join('');
+    return `<div class="class">
       <div class="class-title"><span>Classe de</span><strong>${esc(classData.name)}</strong><small>${esc(classData.advancedName || '')}</small></div>
-      ${requirementSections.join('') || '<p class="empty">Nenhum requisito confirmado para esta classe.</p>'}
-    </div>`);
-  }
+      ${sectionHtml || '<p class="empty">Nenhum requisito confirmado para esta classe.</p>'}
+    </div>`;
+  });
 
   const html = `<!doctype html>
   <html lang="pt-BR">
@@ -233,6 +256,10 @@ export async function generateDigitalNotebook({ scout, classes, submissions }) {
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = `caderno-${slug(scout.name)}.html`;
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
   anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  return { filename: anchor.download, size: blob.size };
 }
