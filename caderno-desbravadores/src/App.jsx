@@ -1013,6 +1013,9 @@ function ReviewBox({
     ? submission.status === 'submitted' ||
       submission.status === 'regionalRejected'
     : submission.status === 'adminApproved';
+  const canReopenReview = isLeadership
+    ? ['adminApproved', 'adminRejected', 'regionalApproved'].includes(submission.status)
+    : ['regionalApproved', 'regionalRejected'].includes(submission.status);
 
   return (
     <div
@@ -1028,7 +1031,7 @@ function ReviewBox({
             : 'Revisão do regional'}
         </b>
 
-        {!pending && (
+        {!pending && canReopenReview && (
           <button
             type="button"
             className="review-link"
@@ -1601,9 +1604,15 @@ function ClassPage({
           'adminApproved';
       } else if (
         old.status ===
-        'adminApproved'
+        'adminApproved' ||
+        old.status === 'adminRejected'
       ) {
         nextStatus = 'submitted';
+      } else if (
+        user.role === 'REGIONAL' &&
+        old.status === 'regionalRejected'
+      ) {
+        nextStatus = 'adminApproved';
       }
 
       next.submissions[key] = {

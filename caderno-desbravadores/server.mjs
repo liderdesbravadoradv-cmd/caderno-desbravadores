@@ -243,7 +243,25 @@ function saveByRole(actor, incoming) {
     next.adminReviews = replaceAllowed(current.adminReviews, incoming.adminReviews, true);
     next.messages = replaceAllowed(current.messages, incoming.messages, true);
   } else if (actor.role === 'REGIONAL') {
-    next.regionalReviews = replaceAllowed(current.regionalReviews, incoming.regionalReviews, true);
+    const submissions = { ...(current.submissions || {}) };
+    for (const key of new Set([...Object.keys(current.submissions || {}), ...Object.keys(incoming.submissions || {})])) {
+      const previous = current.submissions?.[key];
+      const update = incoming.submissions?.[key];
+      if (!previous || !update) continue;
+      const decisionAllowed = previous.status === 'adminApproved'
+        && ['regionalApproved', 'regionalRejected'].includes(update.status);
+      const reopenAllowed = ['regionalApproved', 'regionalRejected'].includes(previous.status)
+        && update.status === 'adminApproved';
+      if (!decisionAllowed && !reopenAllowed) continue;
+      submissions[key] = {
+        ...previous,
+        status: update.status,
+        regionalComment: typeof update.regionalComment === 'string' ? update.regionalComment : previous.regionalComment,
+        regionalAt: typeof update.regionalAt === 'string' ? update.regionalAt : previous.regionalAt,
+        reviewedAt: typeof update.reviewedAt === 'string' ? update.reviewedAt : previous.reviewedAt
+      };
+    }
+    next.submissions = submissions;
   } else if (actor.role === 'DESBRAVADOR') {
     const prefix = `${actor.id}:`;
     next.submissions = replaceAllowed(current.submissions, incoming.submissions, true, (key) => key.startsWith(prefix));
