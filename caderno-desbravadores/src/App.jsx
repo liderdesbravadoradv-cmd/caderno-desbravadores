@@ -18,8 +18,6 @@ import {
   getSessionExpiresAt,
   restoreAuthenticatedUser,
   signOutUser,
-  hasSharedServer,
-  downloadNotebookFromSharedServer,
   exportLocalBackup,
   importSharedBackup
 } from './lib/storage';
@@ -2161,18 +2159,19 @@ function ScoutPanel({
 
   const generateNotebook = async () => {
     if (isGeneratingNotebook) return;
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      setNotebookStatus('Permita a abertura de janelas para gerar o PDF.');
+      return;
+    }
     setIsGeneratingNotebook(true);
-    setNotebookStatus('Preparando os anexos e montando o arquivo HTML…');
+    setNotebookStatus('Preparando o caderno para salvar como PDF…');
     try {
-      if (hasSharedServer()) {
-        await downloadNotebookFromSharedServer();
-        setNotebookStatus('O servidor está preparando o caderno. Acompanhe o download no navegador.');
-        return;
-      }
       const result = await generateDigitalNotebook({
         scout: user,
         classes,
         submissions: mapScoutSubmissions(user.id, db),
+        printWindow,
         onProgress: ({ completed, total, fileCount, totalBytes }) => {
           const size = formatBytes(totalBytes);
           setNotebookStatus(
@@ -2181,11 +2180,12 @@ function ScoutPanel({
         }
       });
       setNotebookStatus(
-        result.destination === 'selected'
-          ? `Arquivo ${result.filename} salvo no local escolhido.`
-          : `Arquivo ${result.filename} gerado. Confira a pasta Downloads.`
+        result.destination === 'print'
+          ? 'Caderno aberto para impressão. Escolha “Salvar como PDF” no destino da impressão.'
+          : `Arquivo ${result.filename} gerado.`
       );
     } catch (error) {
+      printWindow.close();
       setNotebookStatus(
         error.name === 'AbortError'
           ? 'Salvamento cancelado.'

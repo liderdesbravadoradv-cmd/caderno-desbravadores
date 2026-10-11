@@ -196,35 +196,12 @@ async function writeLargeNotebook({ scout, classes, submissions, checklistImage,
   return { size: Math.round(totalBytes * 4 / 3), destination: 'selected' };
 }
 
-export async function generateDigitalNotebook({ scout, classes, submissions, onProgress = () => {} }) {
+export async function generateDigitalNotebook({ scout, classes, submissions, printWindow, onProgress = () => {} }) {
   const approvedFiles = Object.values(submissions)
     .filter((submission) => ['adminApproved', 'regionalApproved'].includes(submission?.status))
     .flatMap((submission) => submission.files || []);
   const totalBytes = approvedFiles.reduce((sum, file) => sum + (Number(file.size) || 0), 0);
   const totalJobs = classes.reduce((sum, classData) => sum + classData.requirements.reduce((sectionSum, [, items]) => sectionSum + items.filter((item) => ['adminApproved', 'regionalApproved'].includes(submissions[`${classData.slug}:${item.id}`]?.status)).length, 0), 0);
-
-  if (totalBytes > 50 * 1024 * 1024) {
-    if (!window.showSaveFilePicker) {
-      throw new Error('Este caderno tem muitos anexos e o navegador não oferece salvamento em fluxo. Abra o link no Google Chrome ou Microsoft Edge para baixar o HTML grande.');
-    }
-    const suggestedName = `caderno-${slug(scout.name)}.html`;
-    const handle = await window.showSaveFilePicker({
-      suggestedName,
-      types: [{ description: 'Caderno digital HTML', accept: { 'text/html': ['.html'] } }]
-    });
-    const writable = await handle.createWritable();
-    try {
-      const checklistImage = await blobData(
-        new Blob([createChecklistSvg(classes, submissions)], { type: 'image/svg+xml;charset=utf-8' })
-      );
-      onProgress({ completed: 0, total: totalJobs, fileCount: approvedFiles.length, totalBytes });
-      const result = await writeLargeNotebook({ scout, classes, submissions, checklistImage, writable, onProgress, fileCount: approvedFiles.length, totalBytes, totalJobs });
-      return { filename: suggestedName, ...result };
-    } catch (error) {
-      await writable.abort().catch(() => {});
-      throw error;
-    }
-  }
 
   const checklistImage = await blobData(
     new Blob([createChecklistSvg(classes, submissions)], { type: 'image/svg+xml;charset=utf-8' })
@@ -250,7 +227,7 @@ export async function generateDigitalNotebook({ scout, classes, submissions, onP
         if (file.type?.startsWith('image/')) {
           media += `<img class="photo" loading="lazy" src="${data}" alt="${esc(file.name)}">`;
         } else if (file.type?.startsWith('video/')) {
-          media += `<video class="video" controls preload="none" src="${data}"></video>`;
+          media += `<video class="video" controls preload="none" src="${data}"></video><span class="print-video-link">📹 Vídeo anexado: ${esc(file.name)} (não reproduzido no PDF)</span>`;
         } else if (file.type === 'application/pdf') {
           media += `<a class="pdf" href="${data}" download="${esc(file.name)}">📄 Abrir PDF: ${esc(file.name)}</a>`;
         } else {
@@ -337,8 +314,10 @@ export async function generateDigitalNotebook({ scout, classes, submissions, onP
         .youtube-preview>span{position:absolute;top:42%;left:50%;transform:translate(-50%,-50%);padding:8px 22px;border-radius:12px;background:#f00;color:#fff;font-size:24px}
         .youtube-preview>strong{position:absolute;bottom:0;left:0;right:0;padding:12px;background:linear-gradient(transparent,#000c);text-align:center}
         .pdf{display:block;padding:9px;background:#f2f6f9;border-radius:8px;margin:5px 0;color:#245b82;text-decoration:none}
+        .print-video-link{display:none}
         .empty{text-align:center;color:#778896;padding:18px}
-        @media print{body{background:#fff}.wrap{max-width:none}.checklist-overview{padding:8mm 6mm}.checklist-overview img{max-height:260mm}.class{padding:18px 28px}}
+        @page{size:A4;margin:14mm}
+        @media print{body{background:#fff;font-size:10pt}.wrap{max-width:none;min-height:0}.cover{padding:18mm 10mm}.cover h1{font-size:28pt}.checklist-overview{padding:8mm 6mm;break-before:page;break-after:page}.checklist-overview img{max-height:250mm}.class{padding:8mm 0;break-before:page}.class section,.req,.answer,.youtube-preview{break-inside:avoid}.video{display:none}.print-video-link{display:block}.youtube-preview{color:#111;background:#f2f2f2;border:1px solid #ccc;text-decoration:underline}.youtube-preview img{opacity:.35}.youtube-preview>span{display:none}.youtube-preview>strong{position:static;background:none;color:#111;text-decoration:underline;padding:8px}.youtube-preview:after{content:attr(href);display:block;font-size:8pt;overflow-wrap:anywhere;padding:0 8px 8px}.pdf{color:#111;text-decoration:underline;overflow-wrap:anywhere}a{color:#0645ad}}
         @media(max-width:600px){.cover{padding:30px 16px}.checklist-overview{padding:14px 10px}.class{padding:18px 14px}}
       </style>
     </head>
@@ -360,15 +339,18 @@ export async function generateDigitalNotebook({ scout, classes, submissions, onP
     </div></body>
   </html>`;
 
-  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = `caderno-${slug(scout.name)}.html`;
-  anchor.style.display = 'none';
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  return { filename: anchor.download, size: blob.size };
+  if (!printWindow || printWindow.closed) throw new Error('A janela de impressão foi fechada. Tente gerar o caderno novamente.');
+  printWindow.document.open();
+  printWindow.document.write(html);
+  printWindow.document.close();
+  printWindow.document.title = `Caderno de ${scout.name}`;
+  printWindow.document.querySelectorAll('img[loading="lazy"]').forEach((image) => { image.loading = 'eager'; });
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  await Promise.all(Array.from(printWindow.document.images, (image) => {
+    if (image.complete) return Promise.resolve();
+    return new Promise((resolve) => { image.onload = resolve; image.onerror = resolve; });
+  }));
+  printWindow.focus();
+  printWindow.print();
+  return { filename: `caderno-${slug(scout.name)}.pdf`, size: totalBytes, destination: 'print' };
 }
