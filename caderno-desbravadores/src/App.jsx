@@ -2175,7 +2175,7 @@ function ScoutPanel({
         onProgress: ({ completed, total, fileCount, totalBytes }) => {
           const size = formatBytes(totalBytes);
           setNotebookStatus(
-            `Preparando ${completed}/${total} requisitos aprovados · ${fileCount} anexos${size ? ` (${size})` : ''}. Arquivos grandes, especialmente vídeos, podem levar alguns minutos.`
+            `Preparando ${completed}/${total} requisitos aprovados · ${fileCount} anexos${size ? ` (${size})` : ''}. Imagens grandes podem levar alguns minutos.`
           );
         }
       });
