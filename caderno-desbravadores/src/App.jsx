@@ -22,7 +22,7 @@ import {
   importSharedBackup
 } from './lib/storage';
 
-import { generateDigitalNotebook } from './lib/notebook';
+import { generateScoutPDF } from './lib/pdf';
 
 const STATUS = {
   none: 'Não iniciado',
@@ -2159,33 +2159,23 @@ function ScoutPanel({
 
   const generateNotebook = async () => {
     if (isGeneratingNotebook) return;
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      setNotebookStatus('Permita a abertura de janelas para gerar o PDF.');
-      return;
-    }
     setIsGeneratingNotebook(true);
-    setNotebookStatus('Preparando o caderno para salvar como PDF…');
+    setNotebookStatus('Montando o arquivo PDF…');
     try {
-      const result = await generateDigitalNotebook({
+      const result = await generateScoutPDF({
         scout: user,
         classes,
+        progress,
         submissions: mapScoutSubmissions(user.id, db),
-        printWindow,
         onProgress: ({ completed, total, fileCount, totalBytes }) => {
           const size = formatBytes(totalBytes);
           setNotebookStatus(
-            `Preparando ${completed}/${total} requisitos aprovados · ${fileCount} anexos${size ? ` (${size})` : ''}. Imagens grandes podem levar alguns minutos.`
+            `Montando ${completed}/${total} requisitos aprovados · ${fileCount} anexos${size ? ` (${size})` : ''}. Imagens grandes podem levar alguns minutos.`
           );
         }
       });
-      setNotebookStatus(
-        result.destination === 'print'
-          ? 'Caderno aberto para impressão. Escolha “Salvar como PDF” no destino da impressão.'
-          : `Arquivo ${result.filename} gerado.`
-      );
+      setNotebookStatus(`Download de ${result.filename} iniciado. Confira a pasta Downloads ou a lista de downloads do navegador.`);
     } catch (error) {
-      printWindow.close();
       setNotebookStatus(
         error.name === 'AbortError'
           ? 'Salvamento cancelado.'
