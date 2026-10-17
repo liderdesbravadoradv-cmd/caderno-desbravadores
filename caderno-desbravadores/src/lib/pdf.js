@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { getEvidenceFile } from './storage';
+import { createChecklistSvg } from './notebook';
 
 const margin = 15;
 const pageWidth = 210;
@@ -96,6 +97,30 @@ export async function generateScoutPDF({ scout, classes, progress, submissions, 
   write(`Nome: ${scout.name}`, { size: 11, bold: true, color: [20, 80, 154] });
   write(`Nascimento: ${scout.birth || '—'}   Clube: ${scout.club || '—'}   Unidade: ${scout.unit || '—'}`);
   y += 3;
+
+  doc.addPage();
+  y = 18;
+  write('CHECKLIST DAS CLASSES', { size: 16, bold: true, color: [20, 80, 154], gap: 2 });
+  write('Visão geral dos requisitos aprovados e pendentes.', { size: 9, color: [85, 105, 125], gap: 5 });
+  const checklistSvg = createChecklistSvg(classes, submissions);
+  const checklistBitmap = await createImageBitmap(new Blob([checklistSvg], { type: 'image/svg+xml;charset=utf-8' }));
+  const checklistCanvas = document.createElement('canvas');
+  checklistCanvas.width = checklistBitmap.width;
+  checklistCanvas.height = checklistBitmap.height;
+  checklistCanvas.getContext('2d').drawImage(checklistBitmap, 0, 0);
+  checklistBitmap.close();
+  const checklistPng = await new Promise((resolve, reject) => {
+    checklistCanvas.toBlob((result) => result ? resolve(result) : reject(new Error('Não foi possível preparar a imagem da checklist.')), 'image/png');
+  });
+  const checklistBytes = new Uint8Array(await checklistPng.arrayBuffer());
+  const checklistScale = Math.min(contentWidth / checklistCanvas.width, 225 / checklistCanvas.height);
+  const checklistWidth = checklistCanvas.width * checklistScale;
+  const checklistHeight = checklistCanvas.height * checklistScale;
+  ensureSpace(checklistHeight + 3);
+  doc.addImage(checklistBytes, 'PNG', margin + (contentWidth - checklistWidth) / 2, y, checklistWidth, checklistHeight, undefined, 'FAST');
+  y += checklistHeight + 3;
+  doc.addPage();
+  y = 18;
 
   for (const classData of classes) {
     ensureSpace(20);

@@ -23,7 +23,7 @@ const blobData = (blob) => new Promise((resolve, reject) => {
   reader.readAsDataURL(blob);
 });
 
-function createChecklistSvg(classes, submissions) {
+export function createChecklistSvg(classes, submissions) {
   const width = 1000;
   const cardWidth = 470;
   const columns = 10;
