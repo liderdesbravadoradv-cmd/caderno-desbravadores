@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { getEvidenceFile } from './storage';
-import { createChecklistSvg } from './notebook';
+import { getClassChecklistLabel } from '../data/classes';
 
 const margin = 15;
 const pageWidth = 210;
@@ -102,13 +102,7 @@ export async function generateScoutPDF({ scout, classes, progress, submissions, 
   y = 18;
   write('CHECKLIST DAS CLASSES', { size: 16, bold: true, color: [20, 80, 154], gap: 2 });
   write('Visão geral dos requisitos aprovados e pendentes.', { size: 9, color: [85, 105, 125], gap: 5 });
-  const checklistSvg = createChecklistSvg(classes, submissions);
-  const checklistBitmap = await createImageBitmap(new Blob([checklistSvg], { type: 'image/svg+xml;charset=utf-8' }));
-  const checklistCanvas = document.createElement('canvas');
-  checklistCanvas.width = checklistBitmap.width;
-  checklistCanvas.height = checklistBitmap.height;
-  checklistCanvas.getContext('2d').drawImage(checklistBitmap, 0, 0);
-  checklistBitmap.close();
+  const checklistCanvas = drawChecklistCanvas(classes, submissions);
   const checklistPng = await new Promise((resolve, reject) => {
     checklistCanvas.toBlob((result) => result ? resolve(result) : reject(new Error('Não foi possível preparar a imagem da checklist.')), 'image/png');
   });
@@ -188,6 +182,126 @@ export async function generateScoutPDF({ scout, classes, progress, submissions, 
   const filename = `caderno-${slugify(scout.name)}.pdf`;
   doc.save(filename);
   return { filename };
+}
+
+function drawChecklistCanvas(classes, submissions) {
+  const width = 1000;
+  const cardWidth = 470;
+  const columns = 10;
+  const cellWidth = 43;
+  const cellHeight = 22;
+  const cards = classes.map((classData) => {
+    const requirements = classData.requirements.flatMap(([, items]) => items);
+    const completed = requirements.filter((item) => ['adminApproved', 'regionalApproved'].includes(submissions[`${classData.slug}:${item.id}`]?.status)).length;
+    const rows = Math.ceil(requirements.length / columns);
+    return { classData, requirements, completed, height: 95 + rows * cellHeight };
+  });
+
+  const rowPositions = [];
+  let nextCardY = 86;
+  for (let index = 0; index < cards.length; index += 2) {
+    const rowHeight = Math.max(cards[index].height, cards[index + 1]?.height || 0);
+    rowPositions.push({ y: nextCardY, height: rowHeight });
+    nextCardY += rowHeight + 12;
+  }
+  const legendY = nextCardY;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = legendY + 34;
+  const context = canvas.getContext('2d');
+  context.fillStyle = '#f4f6f8';
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = '#173f73';
+  context.font = 'bold 24px Arial, sans-serif';
+  context.fillText('Progresso das classes', 20, 36);
+  context.fillStyle = '#617386';
+  context.font = '13px Arial, sans-serif';
+  context.fillText('Itens marcados foram aprovados pela diretoria.', 20, 57);
+
+  cards.forEach((card, classIndex) => {
+    const { classData, requirements, completed } = card;
+    const x = 20 + (classIndex % 2) * 490;
+    const { y } = rowPositions[Math.floor(classIndex / 2)];
+    const color = `#${hexToRgb(classData.color).map((part) => part.toString(16).padStart(2, '0')).join('')}`;
+    const percent = requirements.length ? Math.round((completed / requirements.length) * 100) : 0;
+
+    context.fillStyle = '#fff';
+    context.strokeStyle = color;
+    context.lineWidth = 3;
+    context.beginPath();
+    context.roundRect(x, y, cardWidth, card.height, 16);
+    context.fill();
+    context.stroke();
+    context.fillStyle = color;
+    context.beginPath();
+    context.roundRect(x, y, cardWidth, 46, 14);
+    context.fill();
+    context.fillRect(x, y + 32, cardWidth, 14);
+    context.fillStyle = '#fff';
+    context.font = 'bold 20px Arial, sans-serif';
+    context.fillText(getClassChecklistLabel(classData), x + 18, y + 30);
+    context.font = 'bold 18px Arial, sans-serif';
+    context.textAlign = 'right';
+    context.fillText(`${completed}/${requirements.length}`, x + cardWidth - 18, y + 29);
+    context.textAlign = 'left';
+    context.fillStyle = '#53677a';
+    context.font = '13px Arial, sans-serif';
+    context.fillText(`${percent}% aprovado pela diretoria`, x + 20, y + 64);
+    context.fillStyle = '#e7edf3';
+    context.fillRect(x + 20, y + 70, cardWidth - 40, 6);
+    context.fillStyle = color;
+    context.fillRect(x + 20, y + 70, (cardWidth - 40) * percent / 100, 6);
+
+    requirements.forEach((item, index) => {
+      const isComplete = ['adminApproved', 'regionalApproved'].includes(submissions[`${classData.slug}:${item.id}`]?.status);
+      const cellX = x + 20 + (index % columns) * cellWidth;
+      const cellY = y + 86 + Math.floor(index / columns) * cellHeight;
+      context.fillStyle = isComplete ? color : '#fff';
+      context.strokeStyle = isComplete ? color : '#aab6c2';
+      context.lineWidth = 1.3;
+      context.beginPath();
+      context.roundRect(cellX, cellY, 14, 14, 3);
+      context.fill();
+      context.stroke();
+      context.font = 'bold 10px Arial, sans-serif';
+      context.fillStyle = '#405367';
+      if (isComplete) {
+        context.beginPath();
+        context.moveTo(cellX + 3, cellY + 7);
+        context.lineTo(cellX + 6, cellY + 10);
+        context.lineTo(cellX + 11, cellY + 4);
+        context.strokeStyle = '#fff';
+        context.lineWidth = 1.8;
+        context.stroke();
+      }
+      context.fillText(`${item.sectionCode}-${item.number}`, cellX + 18, cellY + 11);
+    });
+  });
+
+  context.fillStyle = '#14509a';
+  context.beginPath();
+  context.roundRect(21, legendY, 14, 14, 3);
+  context.fill();
+  context.beginPath();
+  context.moveTo(24, legendY + 7);
+  context.lineTo(27, legendY + 10);
+  context.lineTo(32, legendY + 4);
+  context.strokeStyle = '#fff';
+  context.lineWidth = 1.8;
+  context.stroke();
+  context.fillStyle = '#617386';
+  context.font = '13px Arial, sans-serif';
+  context.fillText('Aprovado', 42, legendY + 11);
+  context.fillStyle = '#fff';
+  context.strokeStyle = '#aab6c2';
+  context.lineWidth = 1.3;
+  context.beginPath();
+  context.roundRect(139, legendY, 14, 14, 3);
+  context.fill();
+  context.stroke();
+  context.fillStyle = '#617386';
+  context.fillText('Pendente ou em análise', 160, legendY + 11);
+  return canvas;
 }
 
 function getYouTubeUrl(value) {
