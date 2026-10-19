@@ -4,9 +4,8 @@ import { getClassChecklistLabel } from '../data/classes';
 
 const margin = 15;
 const pageWidth = 210;
-const pageHeight = 297;
 const contentWidth = pageWidth - margin * 2;
-const bottom = pageHeight - 15;
+const bottomMargin = 15;
 
 export async function generateScoutPDF({ scout, classes, progress, submissions, onProgress = () => {} }) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
@@ -20,13 +19,11 @@ export async function generateScoutPDF({ scout, classes, progress, submissions, 
   let y = 18;
   let completed = 0;
 
-  const newPage = () => {
-    doc.addPage();
-    y = 18;
-  };
-
   const ensureSpace = (height = 8) => {
-    if (y + height > bottom) newPage();
+    const requiredHeight = y + height + bottomMargin;
+    if (doc.internal.pageSize.getHeight() < requiredHeight) {
+      doc.internal.pageSize.setHeight(requiredHeight);
+    }
   };
 
   const write = (value, { size = 9, bold = false, color = [40, 53, 67], indent = 0, gap = 1.5 } = {}) => {
@@ -98,8 +95,6 @@ export async function generateScoutPDF({ scout, classes, progress, submissions, 
   write(`Nascimento: ${scout.birth || '—'}   Clube: ${scout.club || '—'}   Unidade: ${scout.unit || '—'}`);
   y += 3;
 
-  doc.addPage();
-  y = 18;
   write('CHECKLIST DAS CLASSES', { size: 16, bold: true, color: [20, 80, 154], gap: 2 });
   write('Visão geral dos requisitos aprovados e pendentes.', { size: 9, color: [85, 105, 125], gap: 5 });
   const checklistCanvas = drawChecklistCanvas(classes, submissions);
@@ -113,8 +108,6 @@ export async function generateScoutPDF({ scout, classes, progress, submissions, 
   ensureSpace(checklistHeight + 3);
   doc.addImage(checklistBytes, 'PNG', margin + (contentWidth - checklistWidth) / 2, y, checklistWidth, checklistHeight, undefined, 'FAST');
   y += checklistHeight + 3;
-  doc.addPage();
-  y = 18;
 
   for (const classData of classes) {
     ensureSpace(20);
@@ -170,14 +163,12 @@ export async function generateScoutPDF({ scout, classes, progress, submissions, 
     }
   }
 
-  const pageCount = doc.getNumberOfPages();
-  for (let page = 1; page <= pageCount; page += 1) {
-    doc.setPage(page);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.setTextColor(120, 132, 145);
-    doc.text(`Caderno de ${scout.name} · ${page}/${pageCount}`, pageWidth - margin, pageHeight - 7, { align: 'right' });
-  }
+  const pageHeight = Math.ceil(y + 15);
+  doc.internal.pageSize.setHeight(pageHeight);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8);
+  doc.setTextColor(120, 132, 145);
+  doc.text(`Caderno de ${scout.name} · Página única`, pageWidth - margin, pageHeight - 7, { align: 'right' });
 
   const filename = `caderno-${slugify(scout.name)}.pdf`;
   doc.save(filename);
