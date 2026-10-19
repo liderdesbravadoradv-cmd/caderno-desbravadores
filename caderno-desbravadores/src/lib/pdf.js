@@ -5,10 +5,10 @@ import { getClassChecklistLabel } from '../data/classes';
 const margin = 15;
 const pageWidth = 210;
 const contentWidth = pageWidth - margin * 2;
-const bottomMargin = 15;
 
 export async function generateScoutPDF({ scout, classes, progress, submissions, onProgress = () => {} }) {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4', compress: true });
+  const measurer = new jsPDF({ unit: 'mm', format: 'a4' });
+  const operations = [];
   const approvedEntries = classes.flatMap((classData) => classData.requirements.flatMap(([, items]) =>
     items
       .map((item) => ({ classData, item, submission: submissions[`${classData.slug}:${item.id}`] }))
@@ -19,44 +19,25 @@ export async function generateScoutPDF({ scout, classes, progress, submissions, 
   let y = 18;
   let completed = 0;
 
-  const ensureSpace = (height = 8) => {
-    const requiredHeight = y + height + bottomMargin;
-    if (doc.internal.pageSize.getHeight() < requiredHeight) {
-      doc.internal.pageSize.setHeight(requiredHeight);
-    }
-  };
-
-  const write = (value, { size = 9, bold = false, color = [40, 53, 67], indent = 0, gap = 1.5 } = {}) => {
-    doc.setFont('helvetica', bold ? 'bold' : 'normal');
-    doc.setFontSize(size);
-    doc.setTextColor(...color);
-    const lines = doc.splitTextToSize(String(value ?? ''), contentWidth - indent);
+  const write = (value, { size = 9, bold = false, color = [40, 53, 67], indent = 0, gap = 1.5, url } = {}) => {
+    measurer.setFont('helvetica', bold ? 'bold' : 'normal');
+    measurer.setFontSize(size);
+    const lines = measurer.splitTextToSize(String(value ?? ''), contentWidth - indent);
     const lineHeight = size * 0.42 + 1.7;
     for (const text of lines) {
-      ensureSpace(lineHeight);
-      doc.text(text, margin + indent, y);
+      const lineY = y;
+      operations.push({ type: 'text', text, x: margin + indent, y: lineY, size, bold, color });
+      if (url) operations.push({ type: 'link', x: margin + indent, y: lineY - size * 0.35, width: Math.min(contentWidth - indent, measurer.getTextWidth(text)), height: lineHeight, url });
       y += lineHeight;
     }
     y += gap;
   };
 
-  const writeLink = (label, url) => {
-    const size = 9;
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(size);
-    doc.setTextColor(0, 80, 160);
-    const lines = doc.splitTextToSize(label, contentWidth);
-    const lineHeight = size * 0.42 + 1.7;
-    for (const text of lines) {
-      ensureSpace(lineHeight);
-      doc.text(text, margin, y);
-      doc.link(margin, y - size * 0.35, Math.min(contentWidth, doc.getTextWidth(text)), lineHeight, { url });
-      y += lineHeight;
-    }
-    y += 1.5;
+  const addImage = (bytes, format, x, yPosition, width, height) => {
+    operations.push({ type: 'image', bytes, format, x, y: yPosition, width, height });
   };
 
-  const writeImage = async (file) => {
+  const prepareImage = async (file) => {
     const { blob } = await getEvidenceFile(file.id);
     const bitmap = await createImageBitmap(blob);
     const maxPixels = 1400;
@@ -67,36 +48,26 @@ export async function generateScoutPDF({ scout, classes, progress, submissions, 
     const context = canvas.getContext('2d');
     context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
     bitmap.close();
-
     const jpeg = await new Promise((resolve, reject) => {
       canvas.toBlob((result) => result ? resolve(result) : reject(new Error('Não foi possível preparar a imagem.')), 'image/jpeg', 0.78);
     });
-    const imageBytes = new Uint8Array(await jpeg.arrayBuffer());
     const imageWidth = Math.min(contentWidth, 170);
     const imageHeight = imageWidth * canvas.height / canvas.width;
     const renderedHeight = Math.min(imageHeight, 105);
-    const renderedWidth = imageWidth * renderedHeight / imageHeight;
-    ensureSpace(renderedHeight + 4);
-    doc.addImage(imageBytes, 'JPEG', margin, y, renderedWidth, renderedHeight, undefined, 'FAST');
-    y += renderedHeight + 4;
+    return { bytes: new Uint8Array(await jpeg.arrayBuffer()), width: imageWidth * renderedHeight / imageHeight, height: renderedHeight };
   };
 
-  doc.setFillColor(20, 80, 154);
-  doc.rect(0, 0, pageWidth, 34, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(20);
-  doc.text('CADERNO DE CLASSES', pageWidth / 2, 15, { align: 'center' });
-  doc.setFontSize(10);
-  doc.text('Desbravadores · Caderno individual', pageWidth / 2, 24, { align: 'center' });
+  operations.push({ type: 'rect', x: 0, y: 0, width: pageWidth, height: 34, color: [20, 80, 154] });
+  operations.push({ type: 'text', text: 'CADERNO DE CLASSES', x: pageWidth / 2, y: 15, size: 20, bold: true, color: [255, 255, 255], align: 'center' });
+  operations.push({ type: 'text', text: 'Desbravadores · Caderno individual', x: pageWidth / 2, y: 24, size: 10, bold: true, color: [255, 255, 255], align: 'center' });
 
   y = 45;
   write(`Nome: ${scout.name}`, { size: 11, bold: true, color: [20, 80, 154] });
   write(`Nascimento: ${scout.birth || '—'}   Clube: ${scout.club || '—'}   Unidade: ${scout.unit || '—'}`);
   y += 3;
-
   write('CHECKLIST DAS CLASSES', { size: 16, bold: true, color: [20, 80, 154], gap: 2 });
   write('Visão geral dos requisitos aprovados e pendentes.', { size: 9, color: [85, 105, 125], gap: 5 });
+
   const checklistCanvas = drawChecklistCanvas(classes, submissions);
   const checklistPng = await new Promise((resolve, reject) => {
     checklistCanvas.toBlob((result) => result ? resolve(result) : reject(new Error('Não foi possível preparar a imagem da checklist.')), 'image/png');
@@ -105,21 +76,14 @@ export async function generateScoutPDF({ scout, classes, progress, submissions, 
   const checklistScale = Math.min(contentWidth / checklistCanvas.width, 225 / checklistCanvas.height);
   const checklistWidth = checklistCanvas.width * checklistScale;
   const checklistHeight = checklistCanvas.height * checklistScale;
-  ensureSpace(checklistHeight + 3);
-  doc.addImage(checklistBytes, 'PNG', margin + (contentWidth - checklistWidth) / 2, y, checklistWidth, checklistHeight, undefined, 'FAST');
+  addImage(checklistBytes, 'PNG', margin + (contentWidth - checklistWidth) / 2, y, checklistWidth, checklistHeight);
   y += checklistHeight + 3;
 
   for (const classData of classes) {
-    ensureSpace(20);
     const classColor = hexToRgb(classData.color);
-    doc.setFillColor(...classColor);
-    doc.roundedRect(margin, y, contentWidth, 10, 2, 2, 'F');
-    doc.setTextColor(255, 255, 255);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.text(`Classe de ${classData.name}`, margin + 4, y + 6.8);
+    operations.push({ type: 'roundedRect', x: margin, y, width: contentWidth, height: 10, radius: 2, color: classColor });
+    operations.push({ type: 'text', text: `Classe de ${classData.name}`, x: margin + 4, y: y + 6.8, size: 11, bold: true, color: [255, 255, 255] });
     y += 14;
-
     const classProgress = progress[classData.slug] || { done: 0, total: classData.total };
     write(`Progresso: ${classProgress.done}/${classProgress.total} (${classProgress.total ? Math.round(classProgress.done / classProgress.total * 100) : 0}%)`, { bold: true });
 
@@ -128,7 +92,6 @@ export async function generateScoutPDF({ scout, classes, progress, submissions, 
         .map((item) => ({ item, submission: submissions[`${classData.slug}:${item.id}`] }))
         .filter(({ submission }) => ['adminApproved', 'regionalApproved'].includes(submission?.status));
       if (!approved.length) continue;
-
       write(section, { size: 10, bold: true, color: classColor, gap: 2 });
       for (const { item, submission } of approved) {
         write(`${item.id}. ${item.text}`, { size: 9, bold: true, gap: 1 });
@@ -141,7 +104,9 @@ export async function generateScoutPDF({ scout, classes, progress, submissions, 
           if (file.type?.startsWith('image/')) {
             try {
               write(`Imagem anexada: ${file.name}`, { size: 8, color: [85, 95, 105], gap: 1 });
-              await writeImage(file);
+              const image = await prepareImage(file);
+              addImage(image.bytes, 'JPEG', margin, y, image.width, image.height);
+              y += image.height + 4;
             } catch {
               write(`Imagem indisponível: ${file.name}`, { size: 8, color: [120, 75, 65] });
             }
@@ -155,7 +120,7 @@ export async function generateScoutPDF({ scout, classes, progress, submissions, 
         }
 
         const youtubeUrl = getYouTubeUrl(submission.youtube);
-        if (youtubeUrl) writeLink(`Vídeo no YouTube: ${youtubeUrl}`, youtubeUrl);
+        if (youtubeUrl) write(`Vídeo no YouTube: ${youtubeUrl}`, { size: 9, color: [0, 80, 160], url: youtubeUrl });
         y += 2;
         completed += 1;
         onProgress({ completed, total: approvedEntries.length, fileCount, totalBytes });
@@ -164,12 +129,28 @@ export async function generateScoutPDF({ scout, classes, progress, submissions, 
   }
 
   const pageHeight = Math.ceil(y + 15);
-  doc.internal.pageSize.setHeight(pageHeight);
+  const doc = new jsPDF({ unit: 'mm', format: [pageWidth, pageHeight], compress: true });
+  for (const operation of operations) {
+    if (operation.type === 'rect' || operation.type === 'roundedRect') {
+      doc.setFillColor(...operation.color);
+      if (operation.type === 'roundedRect') doc.roundedRect(operation.x, operation.y, operation.width, operation.height, operation.radius, operation.radius, 'F');
+      else doc.rect(operation.x, operation.y, operation.width, operation.height, 'F');
+    } else if (operation.type === 'text') {
+      doc.setFont('helvetica', operation.bold ? 'bold' : 'normal');
+      doc.setFontSize(operation.size);
+      doc.setTextColor(...operation.color);
+      doc.text(operation.text, operation.x, operation.y, operation.align ? { align: operation.align } : undefined);
+    } else if (operation.type === 'link') {
+      doc.link(operation.x, operation.y, operation.width, operation.height, { url: operation.url });
+    } else if (operation.type === 'image') {
+      doc.addImage(operation.bytes, operation.format, operation.x, operation.y, operation.width, operation.height, undefined, 'FAST');
+    }
+  }
+
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(120, 132, 145);
   doc.text(`Caderno de ${scout.name} · Página única`, pageWidth - margin, pageHeight - 7, { align: 'right' });
-
   const filename = `caderno-${slugify(scout.name)}.pdf`;
   doc.save(filename);
   return { filename };
