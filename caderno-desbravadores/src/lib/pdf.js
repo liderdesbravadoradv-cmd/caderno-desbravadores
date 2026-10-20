@@ -37,6 +37,13 @@ export async function generateScoutPDF({ scout, classes, progress, submissions, 
     operations.push({ type: 'image', bytes, format, x, y: yPosition, width, height });
   };
 
+  const addYouTubeCard = (url) => {
+    const card = { x: margin, y, width: 88, height: 30, url };
+    operations.push({ type: 'youtubeCard', ...card });
+    operations.push({ type: 'link', ...card });
+    y += card.height + 3;
+  };
+
   const prepareImage = async (file) => {
     const { blob } = await getEvidenceFile(file.id);
     const bitmap = await createImageBitmap(blob);
@@ -120,7 +127,7 @@ export async function generateScoutPDF({ scout, classes, progress, submissions, 
         }
 
         const youtubeUrl = getYouTubeUrl(submission.youtube);
-        if (youtubeUrl) write(`Vídeo no YouTube: ${youtubeUrl}`, { size: 9, color: [0, 80, 160], url: youtubeUrl });
+        if (youtubeUrl) addYouTubeCard(youtubeUrl);
         y += 2;
         completed += 1;
         onProgress({ completed, total: approvedEntries.length, fileCount, totalBytes });
@@ -142,6 +149,21 @@ export async function generateScoutPDF({ scout, classes, progress, submissions, 
       doc.text(operation.text, operation.x, operation.y, operation.align ? { align: operation.align } : undefined);
     } else if (operation.type === 'link') {
       doc.link(operation.x, operation.y, operation.width, operation.height, { url: operation.url });
+    } else if (operation.type === 'youtubeCard') {
+      doc.setFillColor(31, 41, 55);
+      doc.roundedRect(operation.x, operation.y, operation.width, operation.height, 3, 3, 'F');
+      doc.setFillColor(230, 33, 23);
+      doc.roundedRect(operation.x + 3, operation.y + 5, 21, 20, 3, 3, 'F');
+      doc.setFillColor(255, 255, 255);
+      doc.triangle(operation.x + 11, operation.y + 10, operation.x + 11, operation.y + 20, operation.x + 18, operation.y + 15, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(255, 255, 255);
+      doc.text('ASSISTIR NO YOUTUBE', operation.x + 29, operation.y + 13);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.setTextColor(218, 226, 235);
+      doc.text('Clique para abrir o vídeo', operation.x + 29, operation.y + 21);
     } else if (operation.type === 'image') {
       doc.addImage(operation.bytes, operation.format, operation.x, operation.y, operation.width, operation.height, undefined, 'FAST');
     }
