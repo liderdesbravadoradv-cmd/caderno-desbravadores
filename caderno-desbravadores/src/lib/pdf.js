@@ -136,43 +136,53 @@ export async function generateScoutPDF({ scout, classes, progress, submissions, 
   }
 
   const pageHeight = Math.ceil(y + 15);
-  const doc = new jsPDF({ unit: 'mm', format: [pageWidth, pageHeight], compress: true });
+  // jsPDF clips custom pages above 14,400 PDF points. Use PDF UserUnit to
+  // keep the physical layout unchanged while bringing very tall pages under
+  // that coordinate limit.
+  const pageScale = Math.max(1, (pageHeight * 72 / 25.4) / 14000);
+  const scale = (value) => value / pageScale;
+  const doc = new jsPDF({
+    unit: 'mm',
+    format: [scale(pageWidth), scale(pageHeight)],
+    userUnit: pageScale,
+    compress: true
+  });
   for (const operation of operations) {
     if (operation.type === 'rect' || operation.type === 'roundedRect') {
       doc.setFillColor(...operation.color);
-      if (operation.type === 'roundedRect') doc.roundedRect(operation.x, operation.y, operation.width, operation.height, operation.radius, operation.radius, 'F');
-      else doc.rect(operation.x, operation.y, operation.width, operation.height, 'F');
+      if (operation.type === 'roundedRect') doc.roundedRect(scale(operation.x), scale(operation.y), scale(operation.width), scale(operation.height), scale(operation.radius), scale(operation.radius), 'F');
+      else doc.rect(scale(operation.x), scale(operation.y), scale(operation.width), scale(operation.height), 'F');
     } else if (operation.type === 'text') {
       doc.setFont('helvetica', operation.bold ? 'bold' : 'normal');
-      doc.setFontSize(operation.size);
+      doc.setFontSize(scale(operation.size));
       doc.setTextColor(...operation.color);
-      doc.text(operation.text, operation.x, operation.y, operation.align ? { align: operation.align } : undefined);
+      doc.text(operation.text, scale(operation.x), scale(operation.y), operation.align ? { align: operation.align } : undefined);
     } else if (operation.type === 'link') {
-      doc.link(operation.x, operation.y, operation.width, operation.height, { url: operation.url });
+      doc.link(scale(operation.x), scale(operation.y), scale(operation.width), scale(operation.height), { url: operation.url });
     } else if (operation.type === 'youtubeCard') {
       doc.setFillColor(31, 41, 55);
-      doc.roundedRect(operation.x, operation.y, operation.width, operation.height, 3, 3, 'F');
+      doc.roundedRect(scale(operation.x), scale(operation.y), scale(operation.width), scale(operation.height), scale(3), scale(3), 'F');
       doc.setFillColor(230, 33, 23);
-      doc.roundedRect(operation.x + 3, operation.y + 5, 21, 20, 3, 3, 'F');
+      doc.roundedRect(scale(operation.x + 3), scale(operation.y + 5), scale(21), scale(20), scale(3), scale(3), 'F');
       doc.setFillColor(255, 255, 255);
-      doc.triangle(operation.x + 11, operation.y + 10, operation.x + 11, operation.y + 20, operation.x + 18, operation.y + 15, 'F');
+      doc.triangle(scale(operation.x + 11), scale(operation.y + 10), scale(operation.x + 11), scale(operation.y + 20), scale(operation.x + 18), scale(operation.y + 15), 'F');
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
+      doc.setFontSize(scale(9));
       doc.setTextColor(255, 255, 255);
-      doc.text('ASSISTIR NO YOUTUBE', operation.x + 29, operation.y + 13);
+      doc.text('ASSISTIR NO YOUTUBE', scale(operation.x + 29), scale(operation.y + 13));
       doc.setFont('helvetica', 'normal');
-      doc.setFontSize(7);
+      doc.setFontSize(scale(7));
       doc.setTextColor(218, 226, 235);
-      doc.text('Clique para abrir o vídeo', operation.x + 29, operation.y + 21);
+      doc.text('Clique para abrir o vídeo', scale(operation.x + 29), scale(operation.y + 21));
     } else if (operation.type === 'image') {
-      doc.addImage(operation.bytes, operation.format, operation.x, operation.y, operation.width, operation.height, undefined, 'FAST');
+      doc.addImage(operation.bytes, operation.format, scale(operation.x), scale(operation.y), scale(operation.width), scale(operation.height), undefined, 'FAST');
     }
   }
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
+  doc.setFontSize(scale(8));
   doc.setTextColor(120, 132, 145);
-  doc.text(`Caderno de ${scout.name} · Página única`, pageWidth - margin, pageHeight - 7, { align: 'right' });
+  doc.text(`Caderno de ${scout.name} · Página única`, scale(pageWidth - margin), scale(pageHeight - 7), { align: 'right' });
   const filename = `caderno-${slugify(scout.name)}.pdf`;
   doc.save(filename);
   return { filename };
