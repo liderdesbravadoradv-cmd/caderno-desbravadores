@@ -244,7 +244,7 @@ function Topbar({ user, onLogout }) {
   );
 }
 
-function Cover({ scout }) {
+function Cover({ scout, observation, onObservationChange }) {
   return (
     <section className="cover">
       <div className="cover-title">
@@ -272,6 +272,17 @@ function Cover({ scout }) {
         <div>
           <b>Unidade:</b>
           <span>{scout.unit || '—'}</span>
+        </div>
+
+        <div className="identity-observation">
+          <b>Observações:</b>
+          <textarea
+            value={observation}
+            onChange={(event) => onObservationChange(event.target.value)}
+            placeholder="Escreva aqui uma observação para incluir no PDF, se desejar."
+            aria-label="Observações para incluir no caderno PDF"
+            rows={3}
+          />
         </div>
       </div>
     </section>
@@ -2151,6 +2162,7 @@ function ScoutPanel({
 }) {
   const [selected, setSelected] =
     useState('amigo');
+  const [notebookObservation, setNotebookObservation] = useState('');
   const [isGeneratingNotebook, setIsGeneratingNotebook] = useState(false);
   const [notebookStatus, setNotebookStatus] = useState('');
 
@@ -2164,6 +2176,7 @@ function ScoutPanel({
     try {
       const result = await generateScoutPDF({
         scout: user,
+        observation: notebookObservation,
         classes,
         progress,
         submissions: mapScoutSubmissions(user.id, db),
@@ -2188,7 +2201,11 @@ function ScoutPanel({
 
   return (
     <>
-      <Cover scout={user} />
+      <Cover
+        scout={user}
+        observation={notebookObservation}
+        onObservationChange={setNotebookObservation}
+      />
 
       <Checklist
         selected={selected}

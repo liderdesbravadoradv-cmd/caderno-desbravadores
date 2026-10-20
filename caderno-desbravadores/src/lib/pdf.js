@@ -6,7 +6,7 @@ const margin = 15;
 const pageWidth = 210;
 const contentWidth = pageWidth - margin * 2;
 
-export async function generateScoutPDF({ scout, classes, progress, submissions, onProgress = () => {} }) {
+export async function generateScoutPDF({ scout, observation = '', classes, progress, submissions, onProgress = () => {} }) {
   const measurer = new jsPDF({ unit: 'mm', format: 'a4' });
   const operations = [];
   const approvedEntries = classes.flatMap((classData) => classData.requirements.flatMap(([, items]) =>
@@ -71,6 +71,11 @@ export async function generateScoutPDF({ scout, classes, progress, submissions, 
   y = 45;
   write(`Nome: ${scout.name}`, { size: 11, bold: true, color: [20, 80, 154] });
   write(`Nascimento: ${scout.birth || '—'}   Clube: ${scout.club || '—'}   Unidade: ${scout.unit || '—'}`);
+  const cleanObservation = String(observation || '').trim();
+  if (cleanObservation) {
+    write('Observações', { size: 10, bold: true, color: [20, 80, 154], gap: 1 });
+    write(cleanObservation, { size: 9, indent: 2, gap: 4 });
+  }
   y += 3;
   write('CHECKLIST DAS CLASSES', { size: 16, bold: true, color: [20, 80, 154], gap: 2 });
   write('Visão geral dos requisitos aprovados e pendentes.', { size: 9, color: [85, 105, 125], gap: 5 });
